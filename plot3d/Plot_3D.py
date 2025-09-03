@@ -60,12 +60,13 @@ class Plot3DApp:
         'x': 40,  # Cross (increased for better visibility)
     }
     
-    def __init__(self, parent=None, data_path=None):
+    def __init__(self, parent=None, data_path=None, dataframe=None):
         """Initialize the Plot3DApp
         
         Args:
             parent: Parent tkinter window (if integrating with another app)
             data_path: Optional path to data file (skip file dialog)
+            dataframe: Optional DataFrame for direct integration (no file needed)
         """
         self._refresh_in_progress = False
         self.axis_range_changed = False  # Flag to track when axis ranges change
@@ -79,9 +80,14 @@ class Plot3DApp:
         self.current_ax = None  # Store reference to current axes for direct rotation
         self.show_trendline = None  # Will
         
-        # Handle data source - either from parameter or file dialog
-        if data_path:
-            # Use provided data path (integrated mode)
+        # Handle data source - DataFrame, file path, or file dialog
+        if dataframe is not None:
+            # Direct DataFrame integration (no file needed!)
+            self.df = dataframe
+            self.file_path = None  # No file path needed
+            print(f"Using provided DataFrame with {len(dataframe)} rows - no external file required!")
+        elif data_path:
+            # Use provided data path (file-based mode)
             self.file_path = data_path
             print(f"Using provided data path: {self.file_path}")
         else:
@@ -128,8 +134,8 @@ class Plot3DApp:
                 else:
                     return  # Just return in embedded mode
         
-        # Verify file exists before proceeding
-        if not os.path.exists(self.file_path):
+        # Verify file exists before proceeding (only if using file-based mode)
+        if self.file_path and not os.path.exists(self.file_path):
             print(f"Error: File does not exist: {self.file_path}")
             messagebox.showerror("File Not Found", f"The file {self.file_path} does not exist.")
             if parent is None:  # Only exit in standalone mode
@@ -137,15 +143,19 @@ class Plot3DApp:
             else:
                 return  # Just return in embedded mode
             
-        print(f"Selected file: {self.file_path}")
+        if self.file_path:
+            print(f"Selected file: {self.file_path}")
 
-        # Single attempt to open file
-        try:
-            print(f"Opening selected file: {self.file_path}")
-            if not self._open_file_immediate(self.file_path):
-                print("Warning: Could not open file immediately")
-        except Exception as e:
-            print(f"Warning: Failed to open file: {str(e)}")
+        # Single attempt to open file (only if using file-based mode)
+        if self.file_path:
+            try:
+                print(f"Opening selected file: {self.file_path}")
+                if not self._open_file_immediate(self.file_path):
+                    print("Warning: Could not open file immediately")
+            except Exception as e:
+                print(f"Warning: Failed to open file: {str(e)}")
+        else:
+            print("Using DataFrame mode - no file to open")
     
         # Create main window - either standalone or as child window
         if parent is None:
@@ -180,11 +190,14 @@ class Plot3DApp:
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         
-        # Load initial data
-        self.df = load_data(self.file_path)
-        if self.df is None:
-            messagebox.showerror("Error", "Failed to load data")
-            sys.exit(1)
+        # Load initial data (only if not already provided as DataFrame)
+        if not hasattr(self, 'df') or self.df is None:
+            self.df = load_data(self.file_path)
+            if self.df is None:
+                messagebox.showerror("Error", "Failed to load data")
+                sys.exit(1)
+        else:
+            print(f"Using provided DataFrame with {len(self.df)} rows")
             
         # Initialize variables first
         self._init_variables()
@@ -194,14 +207,16 @@ class Plot3DApp:
             self.df = updated_df
             self.refresh_plot()
         
-        # Initialize K-means manager with data and file path
+        # Initialize K-means manager with data and file path (if available)
         self.kmeans_manager = KmeansManager(on_data_update=on_kmeans_update)
-        self.kmeans_manager.set_file_path(self.file_path)
+        if self.file_path:  # Only set file path if we're in file-based mode
+            self.kmeans_manager.set_file_path(self.file_path)
         self.kmeans_manager.load_data(self.df)
         
         # Initialize Delta E manager with the same callback
         self.delta_e_manager = DeltaEManager(on_data_update=on_kmeans_update)
-        self.delta_e_manager.set_file_path(self.file_path)
+        if self.file_path:  # Only set file path if we're in file-based mode
+            self.delta_e_manager.set_file_path(self.file_path)
         self.delta_e_manager.load_data(self.df)
         
         # Initialize logger for custom delta E calculator
@@ -209,7 +224,8 @@ class Plot3DApp:
         
         # Initialize Custom Delta E calculator
         self.custom_delta_e_calculator = ReferencePointCalculator(logger=logger)
-        self.custom_delta_e_calculator.set_file_path(self.file_path)
+        if self.file_path:  # Only set file path if we're in file-based mode
+            self.custom_delta_e_calculator.set_file_path(self.file_path)
         self.custom_delta_e_calculator.load_data(self.df)
         
         # Create figure AFTER data is loaded and BEFORE UI creation
@@ -252,11 +268,18 @@ class Plot3DApp:
                 return
             self._refresh_in_progress = True
             
-            # Load and process data
-            self.df = load_data(self.file_path)
-            if self.df is None:
-                self._refresh_in_progress = False
-                return
+            # Load and process data (only if in file-based mode)
+            if self.file_path:
+                self.df = load_data(self.file_path)
+                if self.df is None:
+                    self._refresh_in_progress = False
+                    return
+            else:
+                # In DataFrame mode, data is already loaded - just ensure it's valid
+                if self.df is None or len(self.df) == 0:
+                    print("No data available for plotting")
+                    self._refresh_in_progress = False
+                    return
             
             # Store current view angles and zoom level before clearing
             current_elev = None
