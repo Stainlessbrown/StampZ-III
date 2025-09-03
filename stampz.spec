@@ -4,7 +4,7 @@ import os
 from PyInstaller.utils.hooks import collect_all
 
 # Version for PyInstaller spec - keep this in sync with __init__.py
-VERSION = '2.0.3'
+VERSION = '3.0.1'
 
 # Safely collect odfpy data files and imports
 try:
@@ -159,7 +159,7 @@ if onefile:
         a.binaries,
         a.datas,
         [],
-        name='StampZ_II',
+        name='StampZ-III',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -180,7 +180,7 @@ else:
         a.scripts,
         [],
         exclude_binaries=True,
-        name='StampZ_II',
+        name='StampZ-III',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -201,15 +201,15 @@ else:
         strip=False,
         upx=True,
         upx_exclude=[],
-        name='StampZ_II',
+        name='StampZ-III',
     )
     
     # macOS app bundle
     if sys.platform == 'darwin':
         app = BUNDLE(
             coll,
-            name='StampZ_II.app',
+            name='StampZ-III.app',
             icon=icon_path,
-            bundle_identifier='com.stainlessbrown.stampz_ii',
+            bundle_identifier='com.stainlessbrown.stampz-iii',
             version=VERSION,
         )

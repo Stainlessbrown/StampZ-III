@@ -31,11 +31,11 @@ class StampZApp:
         ensure_data_directories()
         
         self.root = root
-        self.root.title("StampZ_III")
+        self.root.title("StampZ-III")
         self._set_application_name()
         
         try:
-            self.root.tk.call('wm', 'class', self.root, 'StampZ_III')
+            self.root.tk.call('wm', 'class', self.root, 'StampZ-III')
         except:
             pass
             
@@ -73,7 +73,7 @@ class StampZApp:
     def _set_application_name(self):
         """Set the application name for the system."""
         try:
-            self.root.tk.call('tk', 'appname', 'StampZ_III')
+            self.root.tk.call('tk', 'appname', 'StampZ-III')
         except:
             pass
 
