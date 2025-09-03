@@ -1,4 +1,4 @@
-name: Build StampZ_II Cross-Platform
+name: Build StampZ-III Cross-Platform
 
 on:
   push:
@@ -95,7 +95,7 @@ jobs:
         # macOS: Use stampz.spec for consistent builds with template files included
         python -m PyInstaller stampz.spec
         # Rename the output to match expected name
-        mv dist/StampZ_II.app dist/StampZ_II_${{ matrix.name }}.app
+        mv dist/StampZ-III.app dist/StampZ-III_${{ matrix.name }}.app
         echo "macOS build completed. Checking dist directory:"
         ls -la dist/
         
@@ -107,10 +107,10 @@ jobs:
         # Note: spec file will create onefile build on Windows platform
         python -m PyInstaller stampz.spec
         # Rename the output to match expected name (Windows creates .exe automatically)
-        if (Test-Path "dist/StampZ_II.exe") {
-          Rename-Item "dist/StampZ_II.exe" "StampZ_II_${{ matrix.name }}.exe"
+        if (Test-Path "dist/StampZ-III.exe") {
+          Rename-Item "dist/StampZ-III.exe" "StampZ-III_${{ matrix.name }}.exe"
         } else {
-          Write-Host "ERROR: StampZ_II.exe not found! Checking dist directory:"
+          Write-Host "ERROR: StampZ-III.exe not found! Checking dist directory:"
           Get-ChildItem dist
           exit 1
         }
@@ -123,7 +123,7 @@ jobs:
         # Linux: Use PyInstaller spec file for comprehensive PIL/tkinter support
         python -m PyInstaller stampz.spec
         # Rename the output to match expected name
-        mv dist/StampZ_II dist/StampZ_II_${{ matrix.name }}
+        mv dist/StampZ-III dist/StampZ-III_${{ matrix.name }}
         echo "Linux build completed. Checking dist directory:"
         ls -la dist/
         
@@ -134,12 +134,12 @@ jobs:
         echo "Current dist contents:"
         ls -la
         # macOS: Create zip of the .app bundle (already named correctly)
-        if [ -d "StampZ_II_${{ matrix.name }}.app" ]; then
-          zip -r StampZ_II_${{ matrix.name }}.zip StampZ_II_${{ matrix.name }}.app
-          echo "Created macOS app bundle: StampZ_II_${{ matrix.name }}.zip"
-          ls -la StampZ_II_${{ matrix.name }}.zip
+        if [ -d "StampZ-III_${{ matrix.name }}.app" ]; then
+          zip -r StampZ-III_${{ matrix.name }}.zip StampZ-III_${{ matrix.name }}.app
+          echo "Created macOS app bundle: StampZ-III_${{ matrix.name }}.zip"
+          ls -la StampZ-III_${{ matrix.name }}.zip
         else
-          echo "ERROR: StampZ_II_${{ matrix.name }}.app not found!"
+          echo "ERROR: StampZ-III_${{ matrix.name }}.app not found!"
           ls -la
           exit 1
         fi
@@ -151,7 +151,7 @@ jobs:
         echo "Current dist contents:"
         dir
         echo "Files already correctly named:"
-        dir StampZ_II_${{ matrix.name }}.exe
+        dir StampZ-III_${{ matrix.name }}.exe
         
     - name: Package Linux output
       if: matrix.os == 'ubuntu-22.04'
@@ -160,21 +160,21 @@ jobs:
         echo "Current dist contents:"
         ls -la
         echo "Files already correctly named:"
-        ls -la StampZ_II_${{ matrix.name }}
+        ls -la StampZ-III_${{ matrix.name }}
     
     - name: Upload macOS app bundle
       if: startsWith(matrix.os, 'macos')
       uses: actions/upload-artifact@v4
       with:
-        name: StampZ_II_${{ matrix.name }}
-        path: dist/StampZ_II_${{ matrix.name }}.zip
+        name: StampZ-III_${{ matrix.name }}
+        path: dist/StampZ-III_${{ matrix.name }}.zip
         
     - name: Upload Windows/Linux executable
       if: "!startsWith(matrix.os, 'macos')"
       uses: actions/upload-artifact@v4
       with:
-        name: StampZ_II_${{ matrix.name }}
-        path: dist/StampZ_II_${{ matrix.name }}${{ matrix.ext }}
+        name: StampZ-III_${{ matrix.name }}
+        path: dist/StampZ-III_${{ matrix.name }}${{ matrix.ext }}
 
   cleanup:
     needs: build
