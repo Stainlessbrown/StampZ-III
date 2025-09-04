@@ -1,7 +1,6 @@
 """
 Real-time Plot_3D Spreadsheet with tksheet
 
-Provides a true Excel-like interface for Plot_3D data with:
 - Cell-level formatting (pink protected areas, gray validation)
 - Real dropdown validation for markers, colors, spheres
 - Real-time updates as StampZ analyzes new samples
@@ -426,6 +425,10 @@ class RealtimePlot3DSheet:
                     # Try to get from measurement data, fallback to sample set name format
                     image_name = measurement.get('image_name', f"{self.sample_set_name}_Sample_{i+1:03d}")
                     
+                    # Use saved marker/color preferences if available, otherwise defaults
+                    saved_marker = measurement.get('marker_preference', '.')
+                    saved_color = measurement.get('color_preference', 'blue')
+                    
                     row = [
                         round(x_norm, 6),                   # Xnorm  
                         round(y_norm, 6),                   # Ynorm
@@ -433,8 +436,8 @@ class RealtimePlot3DSheet:
                         image_name,                          # DataID (actual image name!)
                         '',                                  # Cluster
                         '',                                  # ∆E
-                        '.',                                 # Marker
-                        'blue',                              # Color
+                        saved_marker,                        # Marker (restored from DB!)
+                        saved_color,                         # Color (restored from DB!)
                         '',                                  # Centroid_X
                         '',                                  # Centroid_Y
                         '',                                  # Centroid_Z
@@ -544,6 +547,7 @@ class RealtimePlot3DSheet:
             
             # Update database with modified marker/color information
             # This preserves user changes in the internal database
+            updated_count = 0
             for i, row_data in enumerate(data):
                 if not row_data or len(row_data) < len(self.PLOT3D_COLUMNS):
                     continue
@@ -555,13 +559,55 @@ class RealtimePlot3DSheet:
                     color = row_data[7] if len(row_data) > 7 else 'blue'   # Color column
                     
                     if data_id and marker and color:
-                        # Store marker/color preferences for this DataID
-                        # This could be expanded to update measurement records
-                        logger.debug(f"Updated preferences for {data_id}: marker={marker}, color={color}")
+                        # Extract image name and coordinate point from DataID
+                        # Format: SampleSet_Sample_001 or actual_image_name
+                        if '_Sample_' in data_id:
+                            # Parse coordinate point from generated ID
+                            parts = data_id.split('_Sample_')
+                            if len(parts) == 2:
+                                try:
+                                    coord_point = int(parts[1])
+                                    # Use the original image name or generate one
+                                    image_name = data_id  # For now, use full DataID as image name
+                                    
+                                    # Actually update the database with preferences!
+                                    success = db.update_marker_color_preferences(
+                                        image_name=image_name,
+                                        coordinate_point=coord_point, 
+                                        marker=marker,
+                                        color=color
+                                    )
+                                    
+                                    if success:
+                                        updated_count += 1
+                                        logger.debug(f"✅ Saved preferences for {data_id}: marker={marker}, color={color}")
+                                    else:
+                                        logger.debug(f"❌ Failed to save preferences for {data_id}")
+                                        
+                                except ValueError:
+                                    logger.debug(f"Could not parse coordinate point from {data_id}")
+                        else:
+                            # Direct image name - use row index as coordinate point
+                            coord_point = i + 1
+                            success = db.update_marker_color_preferences(
+                                image_name=data_id,
+                                coordinate_point=coord_point,
+                                marker=marker,
+                                color=color
+                            )
+                            
+                            if success:
+                                updated_count += 1
+                                logger.debug(f"✅ Saved preferences for {data_id} (pt {coord_point}): marker={marker}, color={color}")
                         
                 except Exception as row_error:
                     logger.debug(f"Error processing row {i}: {row_error}")
                     continue
+            
+            if updated_count > 0:
+                logger.info(f"✅ Saved {updated_count} marker/color preferences to internal database")
+            else:
+                logger.info("No marker/color preferences to update")
             
             logger.info("Internal database updated with spreadsheet changes")
             

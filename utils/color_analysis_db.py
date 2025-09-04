@@ -110,6 +110,19 @@ class ColorAnalysisDB:
             except sqlite3.OperationalError:
                 pass  # Column already exists
             
+            # Add Plot_3D preference columns for marker/color persistence
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN marker_preference TEXT DEFAULT '.'")
+                print("Added marker_preference column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN color_preference TEXT DEFAULT 'blue'")
+                print("Added color_preference column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
             # Index for faster queries
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_set_point 
@@ -304,7 +317,7 @@ class ColorAnalysisDB:
                             'source_sample_ids': row[19]
                         })
                 else:
-                    # Query without averaged columns (for main databases)
+                    # Query without averaged columns (for main databases) - include marker/color preferences
                     cursor = conn.execute("""
                         SELECT 
                             m.id, m.set_id, s.image_name, m.measurement_date,
@@ -312,7 +325,7 @@ class ColorAnalysisDB:
                             m.l_value, m.a_value, m.b_value, 
                             m.rgb_r, m.rgb_g, m.rgb_b,
                             m.sample_type, m.sample_size, m.sample_anchor,
-                            m.notes
+                            m.notes, m.marker_preference, m.color_preference
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
                         ORDER BY s.image_name, m.coordinate_point, m.measurement_date
@@ -338,6 +351,8 @@ class ColorAnalysisDB:
                             'sample_size': row[14],
                             'sample_anchor': row[15],
                             'notes': row[16],
+                            'marker_preference': row[17] if len(row) > 17 and row[17] else '.',
+                            'color_preference': row[18] if len(row) > 18 and row[18] else 'blue',
                             'is_averaged': False,  # Main DB only contains individual measurements
                             'source_samples_count': None,
                             'source_sample_ids': None
@@ -453,6 +468,61 @@ class ColorAnalysisDB:
         except sqlite3.Error as e:
             print(f"Error cleaning duplicates: {e}")
             return 0
+    
+    def update_marker_color_preferences(self, image_name: str, coordinate_point: int, 
+                                       marker: str = None, color: str = None) -> bool:
+        """Update marker and color preferences for a specific measurement.
+        
+        Args:
+            image_name: Name of the image
+            coordinate_point: Which coordinate point (1-based)
+            marker: Marker preference (e.g., '.', 'o', '*')
+            color: Color preference (e.g., 'blue', 'red', 'green')
+            
+        Returns:
+            True if update was successful
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Build update query for only provided values
+                update_parts = []
+                values = []
+                
+                if marker is not None:
+                    update_parts.append("marker_preference = ?")
+                    values.append(marker)
+                
+                if color is not None:
+                    update_parts.append("color_preference = ?")
+                    values.append(color)
+                
+                if not update_parts:
+                    return True  # Nothing to update
+                
+                # Add WHERE clause values
+                values.extend([image_name, coordinate_point])
+                
+                query = f"""
+                    UPDATE color_measurements 
+                    SET {', '.join(update_parts)}
+                    WHERE set_id = (
+                        SELECT set_id FROM measurement_sets WHERE image_name = ?
+                    ) AND coordinate_point = ?
+                """
+                
+                cursor = conn.execute(query, values)
+                updated_rows = cursor.rowcount
+                
+                if updated_rows > 0:
+                    print(f"Updated preferences for {image_name} point {coordinate_point}: marker={marker}, color={color}")
+                    return True
+                else:
+                    print(f"No measurement found for {image_name} point {coordinate_point}")
+                    return False
+                    
+        except sqlite3.Error as e:
+            print(f"Error updating marker/color preferences: {e}")
+            return False
     
     def get_database_path(self) -> str:
         """Get the path to this sample set's database file."""
