@@ -402,8 +402,9 @@ class AnalysisManager:
     def open_plot3d_data_manager(self):
         """Open unified Plot_3D Data Manager with all data source options."""
         try:
-            from tkinter import Toplevel, Radiobutton, StringVar, Button, Frame, Label
+            from tkinter import Toplevel, Radiobutton, StringVar, Frame, Label
             from tkinter import Listbox, Scrollbar
+            from tkinter import ttk
             
             # Create dialog window
             dialog = Toplevel(self.root)
@@ -470,12 +471,10 @@ class AnalysisManager:
             def on_cancel():
                 dialog.destroy()
             
-            # Create button with better text visibility
-            open_button = Button(action_frame, text="Open in Plot_3D", command=on_open_plot3d, width=20, 
-                               font=("Arial", 12, "bold"), bg="#4CAF50", fg="white", 
-                               activebackground="#45a049", activeforeground="white")
+            # Use themed buttons for proper color handling
+            open_button = ttk.Button(action_frame, text="Open in Plot_3D", command=on_open_plot3d, width=20)
             open_button.pack(side="left", padx=10)
-            Button(action_frame, text="Cancel", command=on_cancel, width=10).pack(side="right", padx=5)
+            ttk.Button(action_frame, text="Cancel", command=on_cancel, width=10).pack(side="right", padx=5)
             
         except Exception as e:
             messagebox.showerror(
@@ -886,7 +885,8 @@ class AnalysisManager:
     
     def _show_spreadsheet_acknowledgment(self, sample_set_name, sheet_window):
         """Show acknowledgment dialog that appears on top of the spreadsheet."""
-        from tkinter import Toplevel, Label, Button, CENTER
+        from tkinter import Toplevel, Label, CENTER
+        from tkinter import ttk
         
         # Create dialog as child of the spreadsheet window
         dialog = Toplevel(sheet_window)
@@ -937,9 +937,7 @@ class AnalysisManager:
             dialog.grab_release()
             dialog.destroy()
         
-        Button(dialog, text="OK", command=close_dialog, 
-               font=("Arial", 12, "bold"), bg="#4CAF50", fg="white",
-               width=10).pack(pady=10)
+        ttk.Button(dialog, text="OK", command=close_dialog, width=10).pack(pady=10)
         
         # Ensure dialog gets focus
         dialog.focus_force()
