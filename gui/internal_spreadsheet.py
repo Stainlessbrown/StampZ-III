@@ -1,4 +1,4 @@
-"""
++"""
 Internal Spreadsheet Manager for StampZ-III
 
 Provides an integrated Tkinter-based spreadsheet view for real-time 

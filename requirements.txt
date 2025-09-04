@@ -15,5 +15,8 @@ scikit-learn==1.5.2
 # Excel export support
 openpyxl==3.1.2
 
+# Spreadsheet widget for Plot_3D data manager
+tksheet==7.5.14
+
 # Build dependencies
 pyinstaller==6.3.0

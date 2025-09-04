@@ -66,6 +66,15 @@ try:
 except Exception:
     pass
 
+# Collect tksheet data files and imports for Plot_3D spreadsheet interface
+try:
+    tksheet_datas, tksheet_binaries, tksheet_hiddenimports = collect_all('tksheet')
+    datas += tksheet_datas
+    binaries += tksheet_binaries
+    hiddenimports += tksheet_hiddenimports
+except Exception:
+    pass
+
 # Add additional hidden imports
 hiddenimports += [
     'PIL.Image',
@@ -105,6 +114,7 @@ hiddenimports += [
     'lxml.html',
     'openpyxl',
     'tifffile',
+    'tksheet',
 ]
 
 # Platform specific settings
