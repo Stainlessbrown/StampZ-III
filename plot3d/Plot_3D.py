@@ -198,6 +198,9 @@ class Plot3DApp:
                 sys.exit(1)
         else:
             print(f"Using provided DataFrame with {len(self.df)} rows")
+            # If DataFrame was provided directly, ensure it has required columns for Plot3D
+            from .data_processor import process_dataframe
+            self.df = process_dataframe(self.df)
             
         # Initialize variables first
         self._init_variables()
