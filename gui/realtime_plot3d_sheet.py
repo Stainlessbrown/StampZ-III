@@ -136,7 +136,7 @@ class RealtimePlot3DSheet:
             show_top_left=True,
             show_row_index=True,
             show_header=True,
-            font=("Arial", 14, "normal")  # Larger font size for better marker visibility (fixed tuple)
+            font=("Monaco", 16, "normal")  # Monospace font for better marker symbol visibility
         )
         self.sheet.pack(fill=tk.BOTH, expand=True)
         
