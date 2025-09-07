@@ -136,7 +136,7 @@ class RealtimePlot3DSheet:
             show_top_left=True,
             show_row_index=True,
             show_header=True,
-            font=("Arial", 14)  # Larger font size for better marker visibility
+            font=("Arial", 14, "normal")  # Larger font size for better marker visibility (fixed tuple)
         )
         self.sheet.pack(fill=tk.BOTH, expand=True)
         
@@ -347,10 +347,10 @@ class RealtimePlot3DSheet:
         status_frame.pack(side=tk.RIGHT, padx=5)
         
         ttk.Label(status_frame, text=f"Sample Set: {self.sample_set_name}", font=('Arial', 9, 'bold')).pack(side=tk.TOP, anchor='e')
-        ttk.Label(status_frame, text="Data Format: Normalized (0-1 range)", font=('Arial', 8), foreground='blue').pack(side=tk.TOP, anchor='e')
+        ttk.Label(status_frame, text="Data Format: Normalized (0-1 range)", font=('Arial', 8, 'normal'), foreground='blue').pack(side=tk.TOP, anchor='e')
         
         # Auto-save status
-        self.auto_save_status = ttk.Label(status_frame, text="Auto-save: Ready", font=('Arial', 8), foreground='green')
+        self.auto_save_status = ttk.Label(status_frame, text="Auto-save: Ready", font=('Arial', 8, 'normal'), foreground='green')
         self.auto_save_status.pack(side=tk.TOP, anchor='e')
         
         # Auto-refresh state

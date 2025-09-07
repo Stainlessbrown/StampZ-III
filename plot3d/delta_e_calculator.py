@@ -626,7 +626,7 @@ class DeltaECalculator:
         self.end_row_entry.pack(side=tk.LEFT, padx=1)
         
         # Reference row input
-        tk.Label(control_frame, text="Ref Row:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(5,0))
+        tk.Label(control_frame, text="Ref Row:", font=("Arial", 9, "normal")).pack(side=tk.LEFT, padx=(5,0))
         self.ref_row_entry = tk.Entry(control_frame, width=3)
         self.ref_row_entry.pack(side=tk.LEFT, padx=1)
         

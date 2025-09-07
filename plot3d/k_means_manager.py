@@ -76,7 +76,7 @@ class KmeansManager:
         self.end_row.pack(side=tk.LEFT, padx=1)
         
         # Number of clusters input
-        tk.Label(control_frame, text="k=", font=("Arial", 9)).pack(side=tk.LEFT, padx=(3,0))
+        tk.Label(control_frame, text="k=", font=("Arial", 9, "normal")).pack(side=tk.LEFT, padx=(3,0))
         self.cluster_count = tk.Entry(control_frame, width=2)
         self.cluster_count.insert(0, "3")
         self.cluster_count.pack(side=tk.LEFT, padx=1)
