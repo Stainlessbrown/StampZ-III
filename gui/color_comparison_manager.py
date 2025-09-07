@@ -439,10 +439,25 @@ class ColorComparisonManager(tk.Frame):
                               command=lambda: self._add_color_to_library(avg_rgb, avg_lab))
         add_button.pack(anchor='se', pady=(0, 5))
         
-        # Add Save Average to Database button
-        save_button = ttk.Button(values_frame, text="Save Average to Database", 
-                               command=lambda: self._save_average_to_database(avg_rgb, avg_lab, enabled_samples))
-        save_button.pack(anchor='se')
+        # Check preference for auto-save and manual button display
+        from utils.user_preferences import get_preferences_manager
+        prefs_manager = get_preferences_manager()
+        auto_save_enabled = prefs_manager.get_auto_save_averages()
+        
+        print(f"DEBUG: ColorComparisonManager - auto_save_enabled: {auto_save_enabled}")
+        
+        if auto_save_enabled:
+            # Auto-save the averages automatically
+            print(f"DEBUG: ColorComparisonManager - Auto-saving averages to database")
+            self._save_average_to_database(avg_rgb, avg_lab, enabled_samples)
+            print(f"DEBUG: ColorComparisonManager - Auto-save completed, NOT showing manual button")
+        else:
+            # Show manual save button when auto-save is disabled
+            print(f"DEBUG: ColorComparisonManager - Auto-save disabled, showing manual button")
+            save_button = ttk.Button(values_frame, text="Save Average to Database", 
+                                   command=lambda: self._save_average_to_database(avg_rgb, avg_lab, enabled_samples))
+            save_button.pack(anchor='se')
+            print(f"DEBUG: ColorComparisonManager - Manual button created and packed")
     
     def _add_color_to_library(self, rgb_values, lab_values):
         """Handle adding the current average color to a library."""

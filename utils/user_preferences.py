@@ -48,6 +48,12 @@ class SampleAreaPreferences:
     default_anchor: str = "center"  # Default anchor position
 
 
+@dataclass
+class CompareModePreferences:
+    """Preferences for Compare mode behavior."""
+    auto_save_averages: bool = False  # Automatically save averages to database
+
+
 # InterfacePreferences class removed - complexity levels no longer used
 @dataclass 
 class UserPreferences:
@@ -56,6 +62,7 @@ class UserPreferences:
     file_dialog_prefs: FileDialogPreferences
     color_library_prefs: ColorLibraryPreferences
     sample_area_prefs: SampleAreaPreferences
+    compare_mode_prefs: CompareModePreferences
     # interface_prefs removed - complexity levels no longer used
     
     def __init__(self):
@@ -63,6 +70,7 @@ class UserPreferences:
         self.file_dialog_prefs = FileDialogPreferences()
         self.color_library_prefs = ColorLibraryPreferences()
         self.sample_area_prefs = SampleAreaPreferences()
+        self.compare_mode_prefs = CompareModePreferences()
         # self.interface_prefs removed - complexity levels no longer used
 
 
@@ -437,6 +445,24 @@ class PreferencesManager:
             'anchor': self.preferences.sample_area_prefs.default_anchor
         }
     
+    def get_auto_save_averages(self) -> bool:
+        """Get whether to automatically save averages to database in Compare mode."""
+        return self.preferences.compare_mode_prefs.auto_save_averages
+    
+    def set_auto_save_averages(self, auto_save: bool) -> bool:
+        """Set whether to automatically save averages to database in Compare mode.
+        
+        Args:
+            auto_save: True to automatically save averages, False to require manual saving
+        """
+        try:
+            self.preferences.compare_mode_prefs.auto_save_averages = auto_save
+            self.save_preferences()
+            return True
+        except Exception as e:
+            print(f"Error setting auto save averages preference: {e}")
+            return False
+    
     def get_export_filename(self, sample_set_name: str = None, extension: str = ".ods") -> str:
         """Generate export filename based on preferences."""
         from datetime import datetime
@@ -514,6 +540,13 @@ class PreferencesManager:
                         default_anchor=sample_data.get('default_anchor', 'center')
                     )
                 
+                # Load compare mode preferences
+                if 'compare_mode_prefs' in data:
+                    compare_data = data['compare_mode_prefs']
+                    self.preferences.compare_mode_prefs = CompareModePreferences(
+                        auto_save_averages=compare_data.get('auto_save_averages', False)
+                    )
+                
                 # Interface preferences removed - complexity levels no longer used
                 
                 print(f"Loaded preferences from {self.prefs_file}")
@@ -547,6 +580,7 @@ class PreferencesManager:
                 'file_dialog_prefs': asdict(self.preferences.file_dialog_prefs),
                 'color_library_prefs': asdict(self.preferences.color_library_prefs),
                 'sample_area_prefs': asdict(self.preferences.sample_area_prefs),
+                'compare_mode_prefs': asdict(self.preferences.compare_mode_prefs),
                 # 'interface_prefs': removed - complexity levels no longer used
             })
             

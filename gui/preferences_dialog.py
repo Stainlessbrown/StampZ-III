@@ -37,9 +37,9 @@ class PreferencesDialog:
         
         # Calculate dialog size based on screen size, leaving space for dock/taskbar
         if screen_height <= 768:  # Small screens (laptops)
-            dialog_height = min(700, int(screen_height * 0.90))  # Much taller for small screens
+            dialog_height = min(800, int(screen_height * 0.95))  # Further increased for Compare Mode tab
         else:  # Larger screens
-            dialog_height = min(850, int(screen_height * 0.90))  # Much taller for large screens
+            dialog_height = min(950, int(screen_height * 0.95))  # Further increased for Compare Mode tab
         
         dialog_width = min(800, int(screen_width * 0.70))  # Wider to accommodate content
         
@@ -70,7 +70,7 @@ class PreferencesDialog:
         self.root.resizable(True, True)
         
         # Set minimum size to ensure all content is usable
-        self.root.minsize(650, 600)  # Increased minimum height significantly
+        self.root.minsize(650, 750)  # Maximum increased minimum height for Compare Mode tab
         
         # Make dialog modal without transient relationship to avoid multi-monitor issues
         # The transient() call causes the dialog to disappear when moved between screens on macOS
@@ -119,6 +119,9 @@ class PreferencesDialog:
         
         # Sampling preferences tab - Advanced configuration
         self._create_sampling_tab(notebook)
+        
+        # Compare mode preferences tab
+        self._create_compare_mode_tab(notebook)
         
         # Future tabs can be added here
         # self._create_general_tab(notebook)
@@ -571,6 +574,61 @@ class PreferencesDialog:
             font=("TkDefaultFont", 9)
         ).pack(anchor=tk.W)
     
+    def _create_compare_mode_tab(self, notebook):
+        """Create the Compare mode preferences tab."""
+        compare_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(compare_frame, text="Compare Mode")
+        
+        # Auto-save averages section
+        auto_save_frame = ttk.LabelFrame(compare_frame, text="Average Color Handling", padding="10")
+        auto_save_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.auto_save_averages_var = tk.BooleanVar()
+        ttk.Checkbutton(
+            auto_save_frame,
+            text="Automatically save averaged colors to database",
+            variable=self.auto_save_averages_var
+        ).pack(anchor=tk.W, pady=(0, 10))
+        
+        # Explanation
+        explanation_text = (
+            "When enabled, averaged colors will be automatically saved to the database "
+            "whenever you calculate an average in Compare mode. This eliminates the need "
+            "to manually click the 'Save Average to Database' button each time.\n\n"
+            "When disabled, you will need to manually click the button to save averages "
+            "if you want them included in your exports."
+        )
+        
+        ttk.Label(
+            auto_save_frame,
+            text=explanation_text,
+            wraplength=550,
+            justify=tk.LEFT,
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        ).pack(anchor=tk.W)
+        
+        # Information section
+        info_frame = ttk.LabelFrame(compare_frame, text="About Compare Mode", padding="10")
+        info_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        info_text = (
+            "Compare mode allows you to analyze sample points from loaded images and compare "
+            "their averaged color values against your color libraries.\n\n"
+            "• Sample points can be toggled on/off to refine the average\n"
+            "• Quality-controlled averaging excludes outliers based on ΔE thresholds\n"
+            "• Saved averages are included in your data exports\n"
+            "• The 'Save Average to Database' button behavior is controlled by this preference"
+        )
+        
+        ttk.Label(
+            info_frame,
+            text=info_text,
+            wraplength=550,
+            justify=tk.LEFT,
+            font=("TkDefaultFont", 9)
+        ).pack(anchor=tk.W)
+    
     def _create_migration_tab(self, notebook):
         """Create the migration tab (only if migration is possible)."""
         try:
@@ -939,6 +997,9 @@ class PreferencesDialog:
         self.export_include_rgb_var.set(self.prefs_manager.get_export_include_rgb())
         self.export_include_lab_var.set(self.prefs_manager.get_export_include_lab())
         
+        # Compare mode preferences
+        self.auto_save_averages_var.set(self.prefs_manager.get_auto_save_averages())
+        
         # Update preview
         self._update_filename_preview()
     
@@ -1059,6 +1120,9 @@ class PreferencesDialog:
             self.prefs_manager.set_export_include_rgb(self.export_include_rgb_var.get())
             self.prefs_manager.set_export_include_lab(self.export_include_lab_var.get())
             
+            # Compare mode preferences
+            self.prefs_manager.set_auto_save_averages(self.auto_save_averages_var.get())
+            
             # Save preferences
             success = self.prefs_manager.save_preferences()
             
@@ -1066,7 +1130,8 @@ class PreferencesDialog:
                 messagebox.showinfo(
                     "Preferences Saved", 
                     "Preferences saved successfully!\n\n"
-                    "Please restart StampZ_II to ensure all changes take effect."
+                    "Most changes take effect immediately.\n"
+                    "Some preferences (like export settings) may require a restart to fully take effect."
                 )
                 return True
             else:
