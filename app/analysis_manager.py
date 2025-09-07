@@ -922,7 +922,7 @@ class AnalysisManager:
         Label(dialog, text="Real-time Spreadsheet Opened", 
               font=("Arial", 14, "bold")).pack(pady=10)
         
-        message = f"Excel-like spreadsheet opened for '{sample_set_name}'.\n\n" + \
+        message = f"User-editable spreadsheet opened for '{sample_set_name}'.\n\n" + \
                   f"Features:\n" + \
                   f"• Pink cells: Protected areas (no manual entry)\n" + \
                   f"• Colored columns: G=Salmon, H=Yellow, L=Yellow\n" + \
