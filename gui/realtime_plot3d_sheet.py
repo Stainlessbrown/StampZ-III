@@ -233,6 +233,17 @@ class RealtimePlot3DSheet:
                 logger.info("Column L formatted with yellow color (rows 2-107)")
             except Exception as l_error:
                 logger.debug(f"Error formatting column L: {l_error}")
+            
+            # Center align all cells
+            try:
+                # Apply center alignment to all cells in the sheet
+                total_rows = self.sheet.get_total_rows()
+                total_cols = len(self.PLOT3D_COLUMNS)
+                all_cells = [(row, col) for row in range(total_rows) for col in range(total_cols)]
+                self.sheet.align_cells(cells=all_cells, align='center')
+                logger.info("Applied center alignment to all cells")
+            except Exception as align_error:
+                logger.debug(f"Error applying center alignment: {align_error}")
                 
             logger.info("Applied cell formatting successfully")
             
@@ -430,9 +441,9 @@ class RealtimePlot3DSheet:
                     saved_color = measurement.get('color_preference', 'blue')
                     
                     row = [
-                        round(x_norm, 6),                   # Xnorm  
-                        round(y_norm, 6),                   # Ynorm
-                        round(z_norm, 6),                   # Znorm
+                        round(x_norm, 4),                   # Xnorm  
+                        round(y_norm, 4),                   # Ynorm
+                        round(z_norm, 4),                   # Znorm
                         image_name,                          # DataID (actual image name!)
                         '',                                  # Cluster
                         '',                                  # ∆E
