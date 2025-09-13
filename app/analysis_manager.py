@@ -141,7 +141,7 @@ class AnalysisManager:
                 sample_set_name = self.app.control_panel.sample_set_name.get().strip()
             
             # Get save location
-            default_filename = f"{sample_set_name}_Plot3D_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            default_filename = f"{sample_set_name}_Plot3D_{datetime.now().strftime('%Y%m%d')}.ods"
             
             # macOS-friendly file dialog approach
             initial_filename = sample_set_name + "_Plot3D_" + datetime.now().strftime('%Y%m%d')
@@ -153,7 +153,6 @@ class AnalysisManager:
                     defaultextension=".ods",
                     filetypes=[
                         ('OpenDocument Spreadsheet', '*.ods'),
-                        ('Excel Workbook', '*.xlsx'),
                         ('All files', '*.*')
                     ],
                     initialfile=initial_filename,
@@ -164,23 +163,15 @@ class AnalysisManager:
                 logger.warning(f"Primary dialog failed: {dialog_error}")
                 filepath = filedialog.asksaveasfilename(
                     title="Save Plot_3D Worksheet",
-                    filetypes=[('OpenDocument Spreadsheet', '*.ods'), ('Excel Workbook', '*.xlsx')]
+                    filetypes=[('OpenDocument Spreadsheet', '*.ods'), ('All files', '*.*')]
                 )
             
             if filepath:
-                # Determine format from file extension
-                file_ext = os.path.splitext(filepath)[1].lower()
-                is_excel = file_ext == '.xlsx'
-                
-                # Create worksheet manager and template
+                # Create worksheet manager and template (ODS format only)
                 manager = WorksheetManager()
                 
-                if is_excel:
-                    # For Excel: Create formatted worksheet with validation
-                    success = manager.create_plot3d_worksheet(filepath, sample_set_name)
-                else:
-                    # For ODS: Create simple template without advanced formatting
-                    success = manager._create_simple_plot3d_template(filepath, sample_set_name)
+                # Create ODS template
+                success = manager._create_simple_plot3d_template(filepath, sample_set_name)
                 
                 if success:
                     # Ask if user wants to populate with existing data
@@ -191,53 +182,23 @@ class AnalysisManager:
                     )
                     
                     if populate:
-                        if is_excel:
-                            data_loaded = manager.load_stampz_data(sample_set_name)
-                            if data_loaded:
-                                manager.save_worksheet(filepath)
-                                messagebox.showinfo(
-                                    "Success",
-                                    f"Plot_3D worksheet created and populated with data from '{sample_set_name}'.\\n\\n"
-                                    f"File saved: {os.path.basename(filepath)}\\n\\n"
-                                    f"• Pink areas (A2:H7): Protected - no manual entry\\n"
-                                    f"• Gray areas (G8:H107, L2:L107): Data validation dropdowns\\n"
-                                    f"• Data starts at row 8"
-                                )
-                            else:
-                                messagebox.showinfo(
-                                    "Template Created",
-                                    f"Plot_3D template created successfully.\\n\\n"
-                                    f"File saved: {os.path.basename(filepath)}\\n\\n"
-                                    f"No existing data found for '{sample_set_name}' - template is ready for data entry."
-                                )
-                        else:
-                            # For ODS, populate using simple method
-                            self._populate_ods_template(filepath, sample_set_name)
-                            messagebox.showinfo(
-                                "Success",
-                                f"Plot_3D template created and populated with data from '{sample_set_name}'.\\n\\n"
-                                f"File saved: {os.path.basename(filepath)}\\n\\n"
-                                f"Format: OpenDocument Spreadsheet (.ods)\\n"
-                                f"Note: Advanced formatting requires Excel (.xlsx) format."
-                            )
+                        # Populate ODS template with existing data
+                        self._populate_ods_template(filepath, sample_set_name)
+                        messagebox.showinfo(
+                            "Success",
+                            f"Plot_3D template created and populated with data from '{sample_set_name}'.\\n\\n"
+                            f"File saved: {os.path.basename(filepath)}\\n\\n"
+                            f"Format: OpenDocument Spreadsheet (.ods) - Plot_3D compatible\\n"
+                            f"Ready for 3D analysis in Plot_3D standalone mode."
+                        )
                     else:
-                        if is_excel:
-                            messagebox.showinfo(
-                                "Template Created",
-                                f"Plot_3D template created successfully.\\n\\n"
-                                f"File saved: {os.path.basename(filepath)}\\n\\n"
-                                f"• Pink areas (A2:H7): Protected - no manual entry\\n"
-                                f"• Gray areas (G8:H107, L2:L107): Data validation dropdowns\\n"
-                                f"• Ready for data entry starting at row 8"
-                            )
-                        else:
-                            messagebox.showinfo(
-                                "Template Created",
-                                f"Plot_3D template created successfully.\\n\\n"
-                                f"File saved: {os.path.basename(filepath)}\\n\\n"
-                                f"Format: OpenDocument Spreadsheet (.ods)\\n"
-                                f"Ready for data entry - columns match Plot_3D format."
-                            )
+                        messagebox.showinfo(
+                            "Template Created",
+                            f"Plot_3D template created successfully.\\n\\n"
+                            f"File saved: {os.path.basename(filepath)}\\n\\n"
+                            f"Format: OpenDocument Spreadsheet (.ods) - Plot_3D compatible\\n"
+                            f"Ready for data entry - columns match Plot_3D format."
+                        )
                 else:
                     messagebox.showerror(
                         "Creation Failed",
@@ -358,9 +319,34 @@ class AnalysisManager:
             logger.error(f"Error populating worksheet from CSV: {e}")
     
     def _populate_ods_template(self, file_path: str, sample_set_name: str):
-        """Populate ODS template with StampZ data."""
+        """Populate ODS template with StampZ data using rigid Plot_3D layout."""
+        try:
+            from utils.worksheet_manager import WorksheetManager
+            
+            # Use WorksheetManager's new rigid ODS population method
+            manager = WorksheetManager()
+            success = manager._create_simple_plot3d_template(file_path, sample_set_name)
+            
+            if success:
+                # Now populate it with actual data using the rigid format
+                self._populate_rigid_ods_with_data(file_path, sample_set_name)
+            
+        except Exception as e:
+            logger.error(f"Error populating ODS template: {e}")
+    
+    def _populate_rigid_ods_with_data(self, file_path: str, sample_set_name: str):
+        """Populate the rigid ODS template with actual measurement data."""
         try:
             from utils.color_analysis_db import ColorAnalysisDB
+            from utils.worksheet_manager import ODF_AVAILABLE
+            
+            if not ODF_AVAILABLE:
+                logger.warning("ODF not available, cannot populate rigid ODS template")
+                return
+            
+            from odf.opendocument import load
+            from odf.table import Table, TableRow, TableCell
+            from odf.text import P
             
             # Get measurements from database
             db = ColorAnalysisDB(sample_set_name)
@@ -370,34 +356,53 @@ class AnalysisManager:
                 logger.warning(f"No measurements found for sample set: {sample_set_name}")
                 return
             
-            # Create DataFrame with data
-            data_rows = []
+            # Load existing ODS file
+            doc = load(file_path)
+            table = doc.spreadsheet.getElementsByType(Table)[0]
+            
+            # Remove existing example rows (rows 9-11) if any
+            rows = table.getElementsByType(TableRow)
+            while len(rows) > 8:  # Keep only metadata + header rows
+                table.removeChild(rows[-1])
+                rows = table.getElementsByType(TableRow)
+            
+            # Add data rows starting at row 9
+            plot3d_columns = [
+                'Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', 
+                '∆E', 'Marker', 'Color', 'Centroid_X', 'Centroid_Y', 
+                'Centroid_Z', 'Sphere', 'Radius'
+            ]
+            
             for i, measurement in enumerate(measurements):
-                row = {
+                tr = TableRow()
+                row_data = {
                     'Xnorm': measurement.get('l_value', 0.0),
                     'Ynorm': measurement.get('a_value', 0.0),
                     'Znorm': measurement.get('b_value', 0.0),
                     'DataID': f"{sample_set_name}_Sample_{i+1:03d}",
                     'Cluster': '',
                     '∆E': '',
-                    'Marker': '.',
-                    'Color': 'blue',
+                    'Marker': measurement.get('marker_preference', '.') or '.',
+                    'Color': measurement.get('color_preference', 'blue') or 'blue',
                     'Centroid_X': '',
                     'Centroid_Y': '',
                     'Centroid_Z': '',
                     'Sphere': '',
                     'Radius': ''
                 }
-                data_rows.append(row)
+                
+                for col in plot3d_columns:
+                    tc = TableCell()
+                    tc.addElement(P(text=str(row_data.get(col, ''))))
+                    tr.addElement(tc)
+                table.addElement(tr)
             
-            # Create DataFrame and save
-            df = pd.DataFrame(data_rows)
-            df.to_excel(file_path, engine='odf', index=False)
-            
-            logger.info(f"Populated ODS template with {len(measurements)} measurements")
+            # Save the updated document
+            doc.save(file_path)
+            logger.info(f"Populated rigid ODS with {len(measurements)} measurements → {file_path}")
             
         except Exception as e:
-            logger.error(f"Error populating ODS template: {e}")
+            logger.error(f"Error populating rigid ODS with data: {e}")
     
     def open_plot3d_data_manager(self):
         """Open unified Plot_3D Data Manager with all data source options."""

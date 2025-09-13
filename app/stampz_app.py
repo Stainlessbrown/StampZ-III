@@ -521,6 +521,15 @@ class StampZApp:
         if self.canvas:
             self.canvas.set_max_vertices(count)
             self.control_panel.vertex_count.set(count)
+            
+            # Enable/disable Fine Square button based on vertex count
+            if hasattr(self.control_panel, 'fine_square_btn'):
+                if count == 4:
+                    self.control_panel.fine_square_btn.config(state='normal')
+                    print("DEBUG: Fine Square button enabled (4 vertices)")
+                else:
+                    self.control_panel.fine_square_btn.config(state='disabled')
+                    print(f"DEBUG: Fine Square button disabled ({count} vertices, need 4)")
 
     def _adjust_vertex_count(self, delta: int):
         """Adjust vertex count by delta."""
@@ -581,6 +590,109 @@ class StampZApp:
         """Apply default application settings."""
         # This will be expanded with actual default settings
         pass
+        
+    def _apply_fine_square(self):
+        """Apply fine square adjustment to the current crop vertices."""
+        print("DEBUG: _apply_fine_square called")
+        
+        if not self.canvas or not self.canvas.original_image:
+            print("DEBUG: No canvas or image available for fine square")
+            from tkinter import messagebox
+            messagebox.showwarning("No Image", "Please open an image before using the Fine Square tool.")
+            return
+        
+        # Get current vertices
+        vertices = self.canvas.get_vertices()
+        if len(vertices) != 4:
+            print(f"DEBUG: Wrong number of vertices: {len(vertices)} (need 4)")
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "Invalid Shape", 
+                "Fine Square adjustment requires exactly 4 vertices. "
+                f"Current shape has {len(vertices)} vertices."
+            )
+            return
+        
+        try:
+            # Import the fine square adjustment function
+            from utils.auto_square import fine_square_adjustment
+            
+            # Apply fine square adjustment with level alignment (horizontal/vertical sides)
+            adjusted_vertices = fine_square_adjustment(vertices, method='preserve_center_level')
+            
+            # Update the canvas with the adjusted vertices
+            self.canvas.set_vertices(adjusted_vertices)
+            
+            print(f"DEBUG: Fine square adjustment applied successfully")
+            print(f"DEBUG: Original vertices: {[(v.x, v.y) for v in vertices]}")
+            print(f"DEBUG: Adjusted vertices: {[(v.x, v.y) for v in adjusted_vertices]}")
+            
+        except Exception as e:
+            print(f"ERROR: Fine square adjustment failed: {e}")
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Fine Square Error", 
+                f"Failed to apply fine square adjustment:\n\n{str(e)}"
+            )
+    
+    def _clear_straightening_points(self):
+        """Clear all straightening reference points."""
+        if not hasattr(self, 'straightening_tool'):
+            print("DEBUG: No straightening tool available")
+            return
+            
+        self.straightening_tool.clear_points()
+        self.control_panel.update_straightening_status(0)
+        if self.canvas:
+            self.canvas.delete('straightening_point')
+        print("DEBUG: Cleared all straightening points")
+    
+    def _apply_straightening(self):
+        """Apply straightening/leveling to the current image."""
+        if not self.canvas or not self.canvas.original_image:
+            from tkinter import messagebox
+            messagebox.showwarning("No Image", "Please open an image before straightening.")
+            return
+
+        if not hasattr(self, 'straightening_tool') or not self.straightening_tool.can_straighten():
+            from tkinter import messagebox
+            messagebox.showwarning("Insufficient Points", "Please place at least 2 reference points.")
+            return
+
+        try:
+            straightened_image, angle = self.straightening_tool.straighten_image(
+                self.canvas.original_image,
+                background_color='white'
+            )
+            self.canvas.load_image(straightened_image)
+            self.straightening_tool.clear_points()
+            self.control_panel.update_straightening_status(0)
+            if self.canvas:
+                self.canvas.delete('straightening_point')
+            
+            print(f"DEBUG: Applied straightening with angle {angle:.2f} degrees")
+            
+            # Provide user feedback about the leveling operation
+            from tkinter import messagebox
+            if abs(angle) < 0.1:
+                messagebox.showinfo(
+                    "Leveling Complete", 
+                    f"Image leveling applied successfully.\n\n"
+                    f"Rotation angle: {angle:.2f}°\n\n"
+                    f"The image was already nearly level."
+                )
+            else:
+                messagebox.showinfo(
+                    "Leveling Complete", 
+                    f"Image leveling applied successfully.\n\n"
+                    f"Rotation angle: {angle:.2f}°\n\n"
+                    f"The image has been straightened."
+                )
+                
+        except Exception as e:
+            print(f"ERROR: Straightening failed: {e}")
+            from tkinter import messagebox
+            messagebox.showerror("Straightening Error", f"Failed to straighten image: {str(e)}")
         
     # Sample management methods
     def _clear_samples(self, skip_confirmation=False, reset_all=False):

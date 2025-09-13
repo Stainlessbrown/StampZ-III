@@ -174,7 +174,22 @@ class KmeansManager:
             print(f"Total rows in DataFrame: {len(df_copy)}")
             
             # Extract the subset of rows to apply K-means on
-            subset_indices = list(self._get_row_indices(start_row, end_row))
+            # CRITICAL DEBUG: Check what columns are available
+            print(f"\n🔍 K-MEANS DATAFRAME DEBUG:")
+            print(f"  DataFrame columns: {list(df_copy.columns)}")
+            print(f"  Has '_original_sheet_row': {'_original_sheet_row' in df_copy.columns}")
+            print(f"  DataFrame shape: {df_copy.shape}")
+            
+            # CRITICAL FIX: Use appropriate row index method based on DataFrame type
+            if '_original_sheet_row' in df_copy.columns:
+                # Realtime worksheet - use special mapping
+                print(f"\n📝 Using realtime worksheet row mapping")
+                subset_indices = list(self._get_row_indices_realtime(start_row, end_row))
+            else:
+                # External file - use original logic (preserves existing functionality)
+                print(f"\n📄 Using file-based row mapping")
+                subset_indices = list(self._get_row_indices(start_row, end_row))
+                
             print(f"\nDebug: Subset indices: {subset_indices}")
             print(f"Number of rows selected: {len(subset_indices)}")
             
@@ -339,9 +354,19 @@ class KmeansManager:
             # Update the "Cluster" column in the original DataFrame
             # Make sure we have the right number of formatted clusters
             
+            # Get the actual row indices from the clean subset data (after filtering)
+            clean_indices = subset_data.index.tolist()  # These are the DataFrame indices of the cleaned data
+            
             # Additional verification to ensure we have assignments for all rows
-            self.logger.info(f"Number of subset indices: {len(subset_indices)}")
+            self.logger.info(f"Number of clean row indices: {len(clean_indices)}")
             self.logger.info(f"Number of cluster assignments: {len(formatted_clusters)}")
+            
+            # Ensure we have the correct number of cluster assignments for cleaned data
+            if len(clean_indices) != len(formatted_clusters):
+                self.logger.error(f"Critical mismatch: {len(clean_indices)} clean rows but {len(formatted_clusters)} cluster assignments")
+                raise ValueError(f"Dimension mismatch: {len(clean_indices)} clean rows vs {len(formatted_clusters)} cluster assignments")
+            
+            # Create centroid mapping
             centroid_map = {}
             for cluster_idx, centroid in enumerate(centroids):
                 centroid_map[cluster_idx] = centroid
@@ -352,39 +377,22 @@ class KmeansManager:
                 if cluster_idx not in centroid_map:
                     self.logger.error(f"Missing centroid for cluster {cluster_idx}")
                     raise ValueError(f"Missing centroid for cluster {cluster_idx}")
-                self.logger.info(f"Cluster {cluster_idx} centroid: {centroid}")
-                self.logger.info(f"Cluster {cluster_idx} centroid: {centroid}")
             
-            # Update the "Cluster" column in the original DataFrame
-            # Make sure we have the right number of formatted clusters
-            if len(subset_indices) != len(formatted_clusters):
-                self.logger.error(f"Mismatch: {len(subset_indices)} selected rows but {len(formatted_clusters)} cluster assignments")
+            # Update the "Cluster" column using the cleaned indices and assignments
+            for i, idx in enumerate(clean_indices):
+                df_copy.at[idx, 'Cluster'] = formatted_clusters[i]
                 
-                # Check which rows might be missing assignments
-                self.logger.info(f"Row indices (len={len(subset_indices)}): {subset_indices}")
-                self.logger.info(f"Formatted clusters (len={len(formatted_clusters)}): {formatted_clusters}")
-                
-                # Check if we're only off by one - likely the last row issue
-                if len(subset_indices) == len(formatted_clusters) + 1:
-                    self.logger.warning("One row may not receive a cluster assignment, possibly the last row")
-                    # Clone the last cluster assignment as a fallback
-                    if len(formatted_clusters) > 0:
-                        # Get the index of the unassigned row (likely the last one)
-                        unassigned_idx = subset_indices[-1]
-                        self.logger.info(f"Row at index {unassigned_idx} may not have a cluster assignment")
-                        
-                        # Clone the last cluster
-            df_copy.iloc[subset_indices, df_copy.columns.get_indexer(["Cluster"])] = formatted_clusters
+            self.logger.info(f"Successfully assigned clusters to {len(clean_indices)} rows")
             
             # Verify all rows received a cluster assignment
-            null_clusters = df_copy.iloc[subset_indices]["Cluster"].isna().sum()
+            null_clusters = df_copy.iloc[clean_indices]["Cluster"].isna().sum()
             if null_clusters > 0:
                 self.logger.warning(f"{null_clusters} rows did not receive a cluster assignment!")
-                problematic_indices = [idx for i, idx in enumerate(subset_indices) if pd.isna(df_copy.iloc[idx]["Cluster"])]
+                problematic_indices = [idx for idx in clean_indices if pd.isna(df_copy.iloc[idx]["Cluster"])]
                 self.logger.warning(f"Rows without assignments: {problematic_indices}")
             
             # Update the centroid coordinates (X, Y, Z) for each point based on its cluster
-            for i, idx in enumerate(subset_indices):
+            for i, idx in enumerate(clean_indices):
                 cluster_idx = int(formatted_clusters[i])
                 centroid = centroid_map[cluster_idx]
                 
@@ -403,22 +411,20 @@ class KmeansManager:
                     raise ValueError(f"Invalid centroid values assigned to {point_id}")
             
             print("\nDebug: Updated centroid coordinates:")
-            print("\nDebug: Updated centroid coordinates:")
-            print(df_copy.iloc[subset_indices[:5]][['DataID', 'Cluster', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']].to_string())
-            print(df_copy.iloc[subset_indices][['DataID', 'Cluster']].head())
+            print(df_copy.iloc[clean_indices[:5]][['DataID', 'Cluster', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']].to_string())
+            print(df_copy.iloc[clean_indices][['DataID', 'Cluster']].head())
             
             # Verify centroid data integrity
-            # Verify centroid data integrity
             self.logger.info("Verifying centroid data integrity in DataFrame...")
-            null_centroids = df_copy.iloc[subset_indices][['Centroid_X', 'Centroid_Y', 'Centroid_Z']].isnull().any(axis=1)
+            null_centroids = df_copy.iloc[clean_indices][['Centroid_X', 'Centroid_Y', 'Centroid_Z']].isnull().any(axis=1)
             if null_centroids.any():
-                problem_rows = df_copy.iloc[subset_indices][null_centroids]
+                problem_rows = df_copy.iloc[clean_indices][null_centroids]
                 self.logger.error(f"Found {len(problem_rows)} rows with missing centroid data:")
                 self.logger.error(problem_rows[['DataID', 'Cluster', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']].to_string())
                 raise ValueError("Missing centroid data detected after K-means clustering")
                 
             self.logger.info("Centroid data integrity verified - all coordinates are valid")
-            self.logger.info(f"K-means clustering applied successfully to {len(subset_data)} rows")
+            self.logger.info(f"K-means clustering applied successfully to {len(clean_indices)} rows")
             
             # Save the updated DataFrame back to the manager
             self.data = df_copy
@@ -520,9 +526,20 @@ class KmeansManager:
         
         # Validate end_row
         max_row = min(999, last_valid_row)
+        
+        # CRITICAL DEBUG: Show validation logic
+        print(f"\n🚨 ROW VALIDATION DEBUG:")
+        print(f"  - Input end_row: {end_row}")
+        print(f"  - last_valid_row: {last_valid_row}")
+        print(f"  - max_row: {max_row}")
+        print(f"  - DataFrame has {len(self.data)} rows")
+        
         if end_row > max_row:
+            print(f"  - ⚠️ TRUNCATING: end_row {end_row} > max_row {max_row}")
             self.logger.warning(f"Invalid end_row {end_row}, adjusting to last non-empty row {max_row}")
             end_row = max_row
+        else:
+            print(f"  - ✅ end_row {end_row} <= max_row {max_row}, no truncation")
         
         # Ensure start_row <= end_row
         if start_row > end_row:
@@ -663,6 +680,80 @@ class KmeansManager:
             
         return range(zero_based_start, zero_based_end)
     
+    def _get_row_indices_realtime(self, start: int, end: int) -> range:
+        """Get row indices for realtime worksheet DataFrame using _original_sheet_row mapping.
+        
+        This method handles the realtime worksheet case where the DataFrame has been
+        pre-filtered and includes _original_sheet_row column for correct mapping.
+        
+        Args:
+            start: 1-based display row number
+            end: 1-based display row number  
+        Returns:
+            range object with DataFrame indices
+        """
+        if '_original_sheet_row' not in self.data.columns:
+            raise ValueError("Realtime method called but _original_sheet_row column not found")
+        
+        print(f"\n📝 REALTIME K-MEANS ROW MAPPING:")
+        print(f"  Input display rows: {start}-{end}")
+        
+        # Convert display rows to sheet rows (display row = sheet row + 1)
+        start_sheet_row = start - 1  # Display row 8 -> sheet row 7
+        end_sheet_row = end - 1      # Display row 27 -> sheet row 26
+        
+        print(f"  Converted to sheet rows: {start_sheet_row}-{end_sheet_row}")
+        
+        # Find DataFrame indices where _original_sheet_row falls in the range
+        original_rows = self.data['_original_sheet_row'].astype(int)
+        mask = (original_rows >= start_sheet_row) & (original_rows <= end_sheet_row)
+        selected_indices = self.data.index[mask].tolist()
+        
+        print(f"  Found {len(selected_indices)} DataFrame indices: {selected_indices}")
+        
+        # Show the mapping for debugging
+        for idx in selected_indices[:5]:  # Show first 5
+            sheet_row = int(self.data.loc[idx, '_original_sheet_row'])
+            display_row = sheet_row + 1
+            data_id = self.data.loc[idx, 'DataID'] if 'DataID' in self.data.columns else f'Row_{idx}'
+            print(f"    DataFrame idx {idx} → sheet row {sheet_row} (display {display_row}) DataID: {data_id}")
+        
+        if not selected_indices:
+            print(f"  ⚠️ No DataFrame rows found for display range {start}-{end}")
+            return range(0, 0)  # Empty range
+        
+        # Convert list to range-like object for compatibility
+        min_idx = min(selected_indices)
+        max_idx = max(selected_indices)
+        
+        # Check if indices are contiguous
+        expected_indices = list(range(min_idx, max_idx + 1))
+        if selected_indices == expected_indices:
+            print(f"  ✅ Indices are contiguous: {min_idx}-{max_idx}")
+            return range(min_idx, max_idx + 1)
+        else:
+            print(f"  ⚠️ NON-CONTIGUOUS INDICES DETECTED:")
+            print(f"  Selected indices: {selected_indices}")
+            print(f"  Expected contiguous: {expected_indices}")
+            
+            # Find gaps in the data
+            missing_indices = [idx for idx in expected_indices if idx not in selected_indices]
+            if missing_indices:
+                print(f"  Missing DataFrame indices: {missing_indices}")
+                
+                # Show what sheet rows the missing indices would correspond to
+                print(f"  Missing indices correspond to these display rows:")
+                for missing_idx in missing_indices[:5]:  # Show first 5 missing
+                    if missing_idx < len(self.data):
+                        # This is a gap within the DataFrame range
+                        print(f"    DataFrame idx {missing_idx}: (gap in data)")
+                    else:
+                        print(f"    DataFrame idx {missing_idx}: (beyond DataFrame bounds)")
+            
+            # For non-contiguous ranges, return the full range but log the issue
+            print(f"  🔧 Returning full range {min_idx}-{max_idx} (K-means will filter out invalid rows)")
+            return range(min_idx, max_idx + 1)
+    
     def _apply_kmeans_gui(self):
         """Handle Apply button click for K-means clustering"""
         try:
@@ -731,6 +822,12 @@ class KmeansManager:
                 self.logger.error(f"Invalid cluster count value: {e}")
                 messagebox.showerror("Input Error", f"Number of clusters must be a valid number.\nError: {str(e)}")
                 return
+            
+            # CRITICAL DEBUG: Show what values we received vs what's being processed
+            print(f"\n🚨 K-MEANS INPUT DEBUG:")
+            print(f"  - User entered start: '{start_value}' → validated: {start}")
+            print(f"  - User entered end: '{end_value}' → validated: {end}")
+            print(f"  - User entered clusters: '{cluster_value}' → validated: {n_clusters}")
             
             # Log the validated values
             self.logger.info(f"Applying K-means: start={start}, end={end}, clusters={n_clusters}")
@@ -807,6 +904,86 @@ class KmeansManager:
             self.logger.error(f"Error verifying file access: {str(e)}")
             return False
     
+    def _save_cluster_assignments_dataframe_mode(self):
+        """
+        Save cluster assignments in DataFrame-only mode (internal worksheet).
+        
+        This method updates the in-memory DataFrame and triggers the callback
+        to sync with the internal worksheet, without requiring a file.
+        """
+        try:
+            self.logger.info("Saving cluster assignments in DataFrame-only mode")
+            
+            # Get the current row selection and validate
+            start = int(self.start_row.get())
+            end = int(self.end_row.get())
+            start, end = self.validate_row_range(start, end)
+            
+            # Get the exact rows we're working with
+            row_indices = self._get_row_indices(start, end)
+            
+            # Get cluster assignments for our selected range
+            clusters = self.data.iloc[row_indices]['Cluster']
+            valid_clusters = clusters[clusters.notna()]
+            
+            if not valid_clusters.empty:
+                # Calculate centroids for each unique cluster
+                cluster_centroids = {}
+                for cluster_num in self.data['Cluster'].dropna().unique():
+                    cluster_mask = self.data['Cluster'] == cluster_num
+                    centroid = [
+                        self.data.loc[cluster_mask, 'Xnorm'].mean(),
+                        self.data.loc[cluster_mask, 'Ynorm'].mean(),
+                        self.data.loc[cluster_mask, 'Znorm'].mean()
+                    ]
+                    cluster_centroids[int(cluster_num)] = centroid
+                    self.logger.info(f"Calculated centroid for cluster {int(cluster_num)}: {centroid}")
+                
+                # Update centroid columns in DataFrame for all points with clusters
+                for i, idx in enumerate(row_indices):
+                    cluster_value = clusters.iloc[i]
+                    if pd.notna(cluster_value):
+                        cluster_int = int(cluster_value)
+                        if cluster_int in cluster_centroids:
+                            centroid = cluster_centroids[cluster_int]
+                            # Update centroid coordinates for this data point
+                            self.data.at[idx, 'Centroid_X'] = centroid[0]
+                            self.data.at[idx, 'Centroid_Y'] = centroid[1]
+                            self.data.at[idx, 'Centroid_Z'] = centroid[2]
+                
+                # Trigger the callback to update Plot_3D and internal worksheet
+                if self.on_data_update:
+                    self.logger.info("Triggering data update callback")
+                    # Store row selection info as attributes for worksheet callback to use
+                    self.on_data_update._kmeans_start_row = start
+                    self.on_data_update._kmeans_end_row = end
+                    self.on_data_update(self.data)
+                
+                # Count how many clusters we saved
+                cluster_counts = valid_clusters.value_counts().to_dict()
+                cluster_info = "\n".join(f"Cluster {k}: {v} points" for k, v in sorted(cluster_counts.items()))
+                
+                # Success message
+                success_msg = (
+                    f"Clusters and centroids saved for rows {start}-{end}!\n\n"
+                    f"Cluster summary:\n{cluster_info}\n\n"
+                    f"Data has been updated in the internal worksheet.\n\n"
+                    f"NEXT STEP: You can now calculate ΔE values by clicking the 'Calculate' button in the ΔE CIE2000 panel."
+                )
+                
+                messagebox.showinfo("Clusters Saved", success_msg)
+                self.logger.info(f"Successfully saved {len(valid_clusters)} cluster assignments in DataFrame mode")
+                
+            else:
+                messagebox.showwarning("Warning", 
+                    f"No cluster assignments found for rows {start}-{end}")
+                
+        except Exception as e:
+            self.logger.error(f"Error saving clusters in DataFrame mode: {e}")
+            messagebox.showerror("Error", 
+                f"Failed to save cluster assignments in DataFrame mode:\n\n{str(e)}")
+            raise
+    
     def save_cluster_assignments(self):
         """
         Save cluster assignments to the current open .ods file with proper file locking.
@@ -814,13 +991,17 @@ class KmeansManager:
         This function implements file locking to prevent conflicts when multiple
         processes try to access the same file. It also performs thorough error
         checking and provides detailed user feedback.
+        
+        For internal worksheet mode (no file), delegates to DataFrame-only save.
         """
         lockfile = None
         try:
+            # Check if we're in DataFrame-only mode (internal worksheet)
             if self.file_path is None:
-                raise ValueError("No file path set")
+                self.logger.info("No file path set - using DataFrame-only mode (internal worksheet)")
+                return self._save_cluster_assignments_dataframe_mode()
                 
-            # Check if file exists and is accessible
+            # File-based mode - check if file exists and is accessible
             if not os.path.exists(self.file_path):
                 raise IOError(f"File not found: {self.file_path}")
                 

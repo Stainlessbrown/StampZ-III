@@ -7,8 +7,11 @@ Each sample set gets its own database file for perfect data separation.
 import sqlite3
 import os
 import re
+import logging
 from typing import List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class ColorAnalysisDB:
     """Handle database operations for color analysis data."""
@@ -120,6 +123,55 @@ class ColorAnalysisDB:
             try:
                 cursor.execute("ALTER TABLE color_measurements ADD COLUMN color_preference TEXT DEFAULT 'blue'")
                 print("Added color_preference column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            # Add Plot_3D extended columns for complete integration
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN cluster_id INTEGER")
+                print("Added cluster_id column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN delta_e REAL")
+                print("Added delta_e column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN centroid_x REAL")
+                print("Added centroid_x column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN centroid_y REAL")
+                print("Added centroid_y column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN centroid_z REAL")
+                print("Added centroid_z column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN sphere_color TEXT")
+                print("Added sphere_color column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN sphere_radius REAL")
+                print("Added sphere_radius column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN trendline_valid BOOLEAN DEFAULT 1")
+                print("Added trendline_valid column")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             
@@ -317,7 +369,7 @@ class ColorAnalysisDB:
                             'source_sample_ids': row[19]
                         })
                 else:
-                    # Query without averaged columns (for main databases) - include marker/color preferences
+                    # Query without averaged columns (for main databases) - include all Plot_3D columns
                     cursor = conn.execute("""
                         SELECT 
                             m.id, m.set_id, s.image_name, m.measurement_date,
@@ -325,7 +377,9 @@ class ColorAnalysisDB:
                             m.l_value, m.a_value, m.b_value, 
                             m.rgb_r, m.rgb_g, m.rgb_b,
                             m.sample_type, m.sample_size, m.sample_anchor,
-                            m.notes, m.marker_preference, m.color_preference
+                            m.notes, m.marker_preference, m.color_preference,
+                            m.cluster_id, m.delta_e, m.centroid_x, m.centroid_y, m.centroid_z,
+                            m.sphere_color, m.sphere_radius, m.trendline_valid
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
                         ORDER BY s.image_name, m.coordinate_point, m.measurement_date
@@ -353,6 +407,14 @@ class ColorAnalysisDB:
                             'notes': row[16],
                             'marker_preference': row[17] if len(row) > 17 and row[17] else '.',
                             'color_preference': row[18] if len(row) > 18 and row[18] else 'blue',
+                            'cluster_id': row[19] if len(row) > 19 and row[19] is not None else None,
+                            'delta_e': row[20] if len(row) > 20 and row[20] is not None else None,
+                            'centroid_x': row[21] if len(row) > 21 and row[21] is not None else None,
+                            'centroid_y': row[22] if len(row) > 22 and row[22] is not None else None,
+                            'centroid_z': row[23] if len(row) > 23 and row[23] is not None else None,
+                            'sphere_color': row[24] if len(row) > 24 and row[24] else '',
+                            'sphere_radius': row[25] if len(row) > 25 and row[25] is not None else None,
+                            'trendline_valid': bool(row[26]) if len(row) > 26 and row[26] is not None else True,
                             'is_averaged': False,  # Main DB only contains individual measurements
                             'source_samples_count': None,
                             'source_sample_ids': None
@@ -522,6 +584,105 @@ class ColorAnalysisDB:
                     
         except sqlite3.Error as e:
             print(f"Error updating marker/color preferences: {e}")
+            return False
+    
+    def update_plot3d_extended_values(self, image_name: str, coordinate_point: int,
+                                     cluster_id: int = None, delta_e: float = None,
+                                     centroid_x: float = None, centroid_y: float = None, centroid_z: float = None,
+                                     sphere_color: str = None, sphere_radius: float = None,
+                                     marker: str = None, color: str = None,
+                                     trendline_valid: bool = None) -> bool:
+        """Update all Plot_3D extended values for a specific measurement.
+        
+        Args:
+            image_name: Name of the image
+            coordinate_point: Which coordinate point (1-based)
+            cluster_id: K-means cluster assignment
+            delta_e: ΔE value
+            centroid_x: X coordinate of cluster centroid
+            centroid_y: Y coordinate of cluster centroid 
+            centroid_z: Z coordinate of cluster centroid
+            sphere_color: Sphere visualization color
+            sphere_radius: Sphere visualization radius
+            marker: Marker preference
+            color: Color preference
+            trendline_valid: Whether this point is valid for trendlines
+            
+        Returns:
+            True if update was successful
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Build update query for only provided values
+                update_parts = []
+                values = []
+                
+                if cluster_id is not None:
+                    update_parts.append("cluster_id = ?")
+                    values.append(cluster_id)
+                    
+                if delta_e is not None:
+                    update_parts.append("delta_e = ?")
+                    values.append(delta_e)
+                    
+                if centroid_x is not None:
+                    update_parts.append("centroid_x = ?")
+                    values.append(centroid_x)
+                    
+                if centroid_y is not None:
+                    update_parts.append("centroid_y = ?")
+                    values.append(centroid_y)
+                    
+                if centroid_z is not None:
+                    update_parts.append("centroid_z = ?")
+                    values.append(centroid_z)
+                    
+                if sphere_color is not None:
+                    update_parts.append("sphere_color = ?")
+                    values.append(sphere_color)
+                    
+                if sphere_radius is not None:
+                    update_parts.append("sphere_radius = ?")
+                    values.append(sphere_radius)
+                    
+                if marker is not None:
+                    update_parts.append("marker_preference = ?")
+                    values.append(marker)
+                    
+                if color is not None:
+                    update_parts.append("color_preference = ?")
+                    values.append(color)
+                    
+                if trendline_valid is not None:
+                    update_parts.append("trendline_valid = ?")
+                    values.append(int(trendline_valid))  # Convert bool to int for SQLite
+                
+                if not update_parts:
+                    return True  # Nothing to update
+                
+                # Add WHERE clause values
+                values.extend([image_name, coordinate_point])
+                
+                query = f"""
+                    UPDATE color_measurements 
+                    SET {', '.join(update_parts)}
+                    WHERE set_id = (
+                        SELECT set_id FROM measurement_sets WHERE image_name = ?
+                    ) AND coordinate_point = ?
+                """
+                
+                cursor = conn.execute(query, values)
+                updated_rows = cursor.rowcount
+                
+                if updated_rows > 0:
+                    logger.debug(f"Updated Plot_3D values for {image_name} point {coordinate_point}: {len(update_parts)} fields")
+                    return True
+                else:
+                    logger.debug(f"No measurement found for {image_name} point {coordinate_point}")
+                    return False
+                    
+        except sqlite3.Error as e:
+            logger.error(f"Error updating Plot_3D extended values: {e}")
             return False
     
     def get_database_path(self) -> str:

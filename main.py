@@ -2,8 +2,9 @@
 """StampZ-III - Main Application Entry Point
 A image analysis application optimized for philatelic images
 
-This is the entry point for StampZ-III. The main application logic
-has been refactored into component managers in the app/ directory.
+This entry point now shows a launch selector dialog allowing users to choose between:
+- Full StampZ-III Application (complete image analysis workflow)
+- Plot_3D Only Mode (advanced 3D analysis and visualization)
 """
 
 # Import initialize_env first to set up data preservation system
@@ -11,22 +12,23 @@ import initialize_env
 
 import tkinter as tk
 import logging
-
-# Import the refactored application
-from app import StampZApp
+import sys
 
 logger = logging.getLogger(__name__)
 
 
-def main():
-    """Main entry point for StampZ-III application."""
+def launch_full_stampz():
+    """Launch the full StampZ-III application."""
+    # Import the refactored application
+    from app import StampZApp
+    
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    logger.info("Starting StampZ-III...")
+    logger.info("Starting full StampZ-III application...")
     
     # Create main window
     root = tk.Tk()
@@ -59,6 +61,51 @@ def main():
             root.destroy()
         except:
             pass
+
+
+def launch_plot3d_only():
+    """Launch Plot_3D only mode."""
+    try:
+        from plot3d.standalone_plot3d import main as plot3d_main
+        plot3d_main()
+    except Exception as e:
+        logger.error(f"Failed to start Plot_3D mode: {e}")
+        try:
+            tk.messagebox.showerror(
+                "Plot_3D Launch Error",
+                f"Failed to start Plot_3D mode:\n\n{str(e)}\n\n"
+                f"Please check the console for detailed error information."
+            )
+        except:
+            print(f"CRITICAL ERROR: {e}")
+
+
+def main():
+    """Main entry point - shows launch mode selector."""
+    try:
+        # Show launch selector
+        from launch_selector import LaunchSelector
+        
+        selector = LaunchSelector()
+        selected_mode = selector.show()
+        
+        if selected_mode == "full":
+            launch_full_stampz()
+            
+        elif selected_mode == "plot3d":
+            launch_plot3d_only()
+            
+        else:
+            # User cancelled or closed dialog
+            print("Launch cancelled by user")
+            sys.exit(0)
+            
+    except Exception as e:
+        print(f"Error during launch: {e}")
+        logging.error(f"Launch selector error: {e}")
+        # Fallback to full application if selector fails
+        print("Falling back to full StampZ-III application...")
+        launch_full_stampz()
 
 
 if __name__ == "__main__":

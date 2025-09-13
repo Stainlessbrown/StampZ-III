@@ -11,6 +11,16 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 from typing import List, Dict, Any, Optional
 import logging
+from utils.rigid_plot3d_templates import RigidPlot3DTemplate
+
+# Optional ODS support via odfpy for precise structure control
+try:
+    from odf.opendocument import OpenDocumentSpreadsheet
+    from odf.table import Table, TableRow, TableCell
+    from odf.text import P
+    ODF_AVAILABLE = True
+except ImportError:
+    ODF_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +52,7 @@ class WorksheetManager:
         """Initialize the worksheet manager."""
         self.workbook = None
         self.worksheet = None
+        self.rigid_template_creator = RigidPlot3DTemplate()
         
     def create_plot3d_worksheet(self, file_path: str, sample_set_name: str = "StampZ_Analysis") -> bool:
         """
@@ -80,26 +91,48 @@ class WorksheetManager:
     
     def _create_simple_plot3d_template(self, file_path: str, sample_set_name: str = "StampZ_Analysis") -> bool:
         """
-        Create a simple Plot_3D template for ODS format (without advanced Excel formatting).
-        
-        Args:
-            file_path: Path where to save the file
-            sample_set_name: Name for the sample set
-            
-        Returns:
-            True if successful, False otherwise
+        Create a Plot_3D ODS template that follows rigid format rules:
+        - Rows 1-7: metadata/instructions
+        - Row 8: Plot_3D column headers (PLOT3D_COLUMNS)
+        - Row 9+: Data rows
         """
         try:
-            import pandas as pd
+            if not ODF_AVAILABLE:
+                raise ImportError("odfpy not available. Install with: pip install odfpy==1.4.1")
             
-            # Create simple DataFrame with Plot_3D structure
-            # Create empty DataFrame with correct columns
-            df = pd.DataFrame(columns=self.PLOT3D_COLUMNS)
+            doc = OpenDocumentSpreadsheet()
+            table = Table(name="Plot3D_Data")
             
-            # Add some sample rows to show structure (user can delete)
-            sample_rows = []
+            # Rows 1-7 metadata/instructions
+            meta_rows = [
+                ["Plot_3D Data Template", "", "", "", "", "", "", "", "", "", "", "", "Instructions"],
+                [f"Sample Set: {sample_set_name}", "", "", "", "", "", "", "", "", "", "", "", "Enter data starting at row 9"],
+                ["Created by StampZ-III", "", "", "", "", "", "", "", "", "", "", "", "Use dropdowns where applicable"],
+                ["", "", "", "", "", "", "", "", "", "", "", "", "Do NOT modify headers"],
+                ["IMPORTANT: This format is required for Plot_3D", "", "", "", "", "", "", "", "", "", "", "", "Save before Refresh Data"],
+                ["K-means expects exact column order", "", "", "", "", "", "", "", "", "", "", "", ""],
+                ["ΔE calculations depend on structure", "", "", "", "", "", "", "", "", "", "", "", ""],
+            ]
+            for row_vals in meta_rows:
+                tr = TableRow()
+                for val in row_vals:
+                    tc = TableCell()
+                    tc.addElement(P(text=str(val)))
+                    tr.addElement(tc)
+                table.addElement(tr)
+            
+            # Row 8 headers
+            header_tr = TableRow()
+            for header in self.PLOT3D_COLUMNS:
+                tc = TableCell()
+                tc.addElement(P(text=header))
+                header_tr.addElement(tc)
+            table.addElement(header_tr)
+            
+            # Add 3 example rows (optional)
             for i in range(3):
-                row = {
+                tr = TableRow()
+                example = {
                     'Xnorm': '', 'Ynorm': '', 'Znorm': '',
                     'DataID': f"{sample_set_name}_Sample_{i+1:03d}",
                     'Cluster': '', '∆E': '',
@@ -107,19 +140,18 @@ class WorksheetManager:
                     'Centroid_X': '', 'Centroid_Y': '', 'Centroid_Z': '',
                     'Sphere': '', 'Radius': ''
                 }
-                sample_rows.append(row)
+                for col in self.PLOT3D_COLUMNS:
+                    tc = TableCell()
+                    tc.addElement(P(text=str(example.get(col, ''))))
+                    tr.addElement(tc)
+                table.addElement(tr)
             
-            # Add sample rows to DataFrame
-            df = pd.concat([df, pd.DataFrame(sample_rows)], ignore_index=True)
-            
-            # Export to ODS
-            df.to_excel(file_path, engine='odf', index=False)
-            
-            logger.info(f"Created simple Plot_3D template: {file_path}")
+            doc.spreadsheet.addElement(table)
+            doc.save(file_path)
+            logger.info(f"Created Plot_3D ODS template with rigid layout: {file_path}")
             return True
-            
         except Exception as e:
-            logger.error(f"Error creating simple template: {e}")
+            logger.error(f"Error creating ODS rigid template: {e}")
             return False
     
     def _setup_headers(self):
@@ -329,6 +361,100 @@ class WorksheetManager:
             
         except Exception as e:
             logger.error(f"Error exporting to {export_format}: {e}")
+            return False
+    
+    def create_rigid_plot3d_worksheet(self, file_path: str, sample_set_name: str = "StampZ_Analysis") -> bool:
+        """
+        Create a rigid, protected Plot_3D worksheet that prevents format corruption.
+        
+        This method creates templates with:
+        - Protected column structure required for K-means clustering
+        - Format compliance for ΔE calculations
+        - "Refresh Data" functionality support
+        - Data validation dropdowns
+        - Sheet protection preventing structural changes
+        
+        Args:
+            file_path: Path where to save the Excel file
+            sample_set_name: Name for the sample set
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            success = self.rigid_template_creator.create_rigid_template(file_path, sample_set_name)
+            if success:
+                # Set up this manager to work with the created template
+                self.workbook = openpyxl.load_workbook(file_path)
+                self.worksheet = self.workbook['Plot3D_Data']
+                logger.info(f"Created rigid Plot_3D worksheet: {file_path}")
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error creating rigid worksheet: {e}")
+            return False
+    
+    def populate_rigid_template(self, sample_set_name: str) -> bool:
+        """
+        Populate a rigid template with StampZ data while maintaining protection.
+        
+        Args:
+            sample_set_name: Name of the sample set to load data from
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not self.worksheet:
+                logger.error("No worksheet loaded. Create or load a rigid template first.")
+                return False
+                
+            # Temporarily unprotect for data population (if needed)
+            sheet_was_protected = self.worksheet.protection.sheet
+            if sheet_was_protected:
+                self.worksheet.protection.sheet = False
+            
+            # Load and populate data
+            success = self.load_stampz_data(sample_set_name)
+            
+            # Restore protection
+            if sheet_was_protected:
+                self.worksheet.protection.sheet = True
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error populating rigid template: {e}")
+            return False
+    
+    def is_rigid_template(self, file_path: str) -> bool:
+        """
+        Check if a file is a rigid Plot_3D template.
+        
+        Args:
+            file_path: Path to the file to check
+            
+        Returns:
+            True if it's a rigid template, False otherwise
+        """
+        try:
+            workbook = openpyxl.load_workbook(file_path)
+            worksheet = workbook.active
+            
+            # Check for rigid template markers
+            cell_a1 = worksheet['A1'].value
+            cell_a5 = worksheet['A5'].value
+            
+            is_rigid = (
+                cell_a1 and "Plot_3D Data Template" in str(cell_a1) and
+                cell_a5 and "IMPORTANT: This template format is required" in str(cell_a5)
+            )
+            
+            workbook.close()
+            return is_rigid
+            
+        except Exception as e:
+            logger.error(f"Error checking if file is rigid template: {e}")
             return False
 
 

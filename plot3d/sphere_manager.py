@@ -205,6 +205,15 @@ class SphereManager:
             self.logger.info(f"Found {len(centroid_data)} points with valid centroid coordinates for spheres")
             print(f"DEBUG: Found {len(centroid_data)} points with valid centroid coordinates for spheres")
             
+            # SAFE DEBUG: Show what sphere data we're working with (doesn't change logic)
+            if len(centroid_data) > 0:
+                print(f"DEBUG: Sample centroid rows with sphere data:")
+                for i, (idx, row) in enumerate(centroid_data.head(5).iterrows()):
+                    sphere_val = row.get('Sphere', 'N/A')
+                    radius_val = row.get('Radius', 'N/A') 
+                    data_id = row.get('DataID', 'N/A')
+                    print(f"  Row {idx}: DataID={data_id}, Sphere='{sphere_val}', Radius='{radius_val}'")
+            
             if len(centroid_data) == 0:
                 self.logger.info("No valid centroid data found for sphere rendering")
                 print("DEBUG: No valid centroid data found for sphere rendering")

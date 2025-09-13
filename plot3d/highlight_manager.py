@@ -103,10 +103,23 @@ class HighlightManager:
             self.row_mapping = {}
             self.index_to_row = {}
             
-            # Check if we have a 'original_row' column that might have been added in data_processor.py
-            # This would provide exact mapping between spreadsheet rows and DataFrame indices
-            if 'original_row' in self.data_df.columns:
-                print("DEBUG: Using 'original_row' column for precise row mapping")
+            # CRITICAL FIX: Check for _original_sheet_row column from internal worksheet
+            # This provides exact mapping between display rows and DataFrame indices
+            if '_original_sheet_row' in self.data_df.columns:
+                print("DEBUG: Using '_original_sheet_row' column for precise row mapping (REALTIME WORKSHEET)")
+                for idx, row in self.data_df.iterrows():
+                    orig_sheet_row = int(row['_original_sheet_row'])
+                    # Display row = sheet row + 1 (sheet rows are 0-based, display rows are 1-based)
+                    display_row = orig_sheet_row + 1
+                    self.row_mapping[display_row] = idx
+                    self.index_to_row[idx] = display_row
+                    
+                    # DEBUG: Show the mapping for first few rows
+                    if idx < 5:
+                        print(f"DEBUG: Display row {display_row} → DataFrame index {idx} (sheet row {orig_sheet_row})")
+                        
+            elif 'original_row' in self.data_df.columns:
+                print("DEBUG: Using 'original_row' column for precise row mapping (FILE-BASED)")
                 for idx, row in self.data_df.iterrows():
                     orig_row = int(row['original_row'])
                     # Adjust for header row (+1) and zero-indexing (+1) = +2
@@ -114,8 +127,8 @@ class HighlightManager:
                     self.row_mapping[spreadsheet_row] = idx
                     self.index_to_row[idx] = spreadsheet_row
             else:
-                # Fall back to default sequential mapping
-                print("DEBUG: Using default sequential row mapping")
+                # Fall back to default sequential mapping (LEGACY)
+                print("DEBUG: Using default sequential row mapping (LEGACY - may be incorrect)")
                 # Row 2 in spreadsheet = index 0 in DataFrame (accounting for header row)
                 self.row_mapping = {i+2: i for i in range(df_length)}
                 self.index_to_row = {i: i+2 for i in range(df_length)}

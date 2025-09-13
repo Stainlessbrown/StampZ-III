@@ -1436,13 +1436,15 @@ class ODSExporter:
             return False, error_msg
     
     def _create_plot3d_document(self, measurements: List[ColorMeasurement]) -> OpenDocumentSpreadsheet:
-        """Create an ODS document formatted specifically for Plot_3D.
+        """Create an ODS document formatted specifically for Plot_3D using rigid format.
         
-        Plot_3D expects all these columns:
-        ['Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', '∆E', 'Marker', 'Color', 'Sphere', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']
-        - Headers in row 1
-        - Data starts at row 8 (rows 2-7 are blank/reserved for Plot_3D metadata)
+        Plot_3D rigid format requirements:
+        - Rows 1-7: Metadata and instructions (reserved for Plot_3D compatibility)
+        - Row 8: Column headers ['Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', '∆E', 'Marker', 'Color', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', 'Sphere', 'Radius']
+        - Row 9+: Data rows
         - Normalized values (0.0-1.0 range)
+        
+        This format ensures compatibility with Plot_3D's highlight and group highlight functions.
         """
         if not ODF_AVAILABLE:
             raise RuntimeError("odfpy library not available. Cannot create ODS document.")
@@ -1454,40 +1456,38 @@ class ODSExporter:
         table = Table(name="Plot_3D Data")
         
         # Plot_3D expected columns - includes Radius column which is required
-        # StampZ only populates first 4 columns, Plot_3D manages the rest
         headers = ['Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', '∆E', 'Marker', 
                    'Color', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', 'Sphere', 'Radius']
         
-        # Add header row at row 1
-        header_row = TableRow()
+        # Rows 1-7: Metadata and instructions (rigid format requirement)
+        metadata_rows = [
+            ["Plot_3D Data Template", "", "", "", "", "", "", "", "", "", "", "", "Instructions"],
+            [f"Sample Set: {self.sample_set_name or 'StampZ_Export'}", "", "", "", "", "", "", "", "", "", "", "", "Data starts at row 9"],
+            ["Created by StampZ-III", "", "", "", "", "", "", "", "", "", "", "", "Use dropdowns where applicable"],
+            ["Rigid format for Plot_3D compatibility", "", "", "", "", "", "", "", "", "", "", "", "Do NOT modify row structure"],
+            ["IMPORTANT: This format is required for Plot_3D", "", "", "", "", "", "", "", "", "", "", "", "Highlight functions depend on this"],
+            ["K-means expects exact column order", "", "", "", "", "", "", "", "", "", "", "", "Save before Refresh Data"],
+            ["ΔE calculations depend on structure", "", "", "", "", "", "", "", "", "", "", "", ""]
+        ]
         
+        # Add metadata rows (rows 1-7)
+        for row_values in metadata_rows:
+            meta_row = TableRow()
+            for value in row_values:
+                cell = TableCell()
+                cell.addElement(P(text=str(value)))
+                meta_row.addElement(cell)
+            table.addElement(meta_row)
+        
+        # Row 8: Column headers
+        header_row = TableRow()
         for header in headers:
             cell = TableCell()
             cell.addElement(P(text=header))
             header_row.addElement(cell)
-        
         table.addElement(header_row)
         
-        # Add empty rows 2-7 reserved for Plot_3D metadata/data validity tables
-        # The data validity tables should appear as dropdown lists in LibreOffice Calc
-        # when the user clicks on the appropriate columns (G, H, L)
-        # Data from RTF file: 
-        # Marker Type table (column G): ^, <, >, v, o, s, p, h, x, *, D, +
-        # Color tables H (column H): red, green, blue, lime, blueviolet, purple, darkorange, black, orchid, deeppink
-        # Color table L (column L): red, green, blue, yellow, blueviolet, cyan, magenta, orange, purple, brown, pink, lime, navy, teal
-        
-        for i in range(6):
-            validity_row = TableRow()
-            # All cells in rows 2-7 should be empty - data validity tables are dropdown selections only
-            validity_values = ['', '', '', '', '', '', '', '', '', '', '', '', '']  # 13 empty cells
-            
-            for value in validity_values:
-                cell = TableCell()
-                cell.addElement(P(text=value))
-                validity_row.addElement(cell)
-            table.addElement(validity_row)
-        
-        # Add data rows starting from row 8 (after 6 blank rows + header)
+        # Rows 9+: Data rows
         for measurement in measurements:
             row = TableRow()
             

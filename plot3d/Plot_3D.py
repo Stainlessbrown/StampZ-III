@@ -60,13 +60,14 @@ class Plot3DApp:
         'x': 40,  # Cross (increased for better visibility)
     }
     
-    def __init__(self, parent=None, data_path=None, dataframe=None):
+    def __init__(self, parent=None, data_path=None, dataframe=None, worksheet_update_callback=None):
         """Initialize the Plot3DApp
         
         Args:
             parent: Parent tkinter window (if integrating with another app)
             data_path: Optional path to data file (skip file dialog)
             dataframe: Optional DataFrame for direct integration (no file needed)
+            worksheet_update_callback: Optional callback to update parent worksheet with changes
         """
         self._refresh_in_progress = False
         self.axis_range_changed = False  # Flag to track when axis ranges change
@@ -79,6 +80,9 @@ class Plot3DApp:
         self.show_trendline = None  # Will be initialized in _init_ui
         self.current_ax = None  # Store reference to current axes for direct rotation
         self.show_trendline = None  # Will
+        
+        # Store the worksheet update callback for bidirectional data flow
+        self.worksheet_update_callback = worksheet_update_callback
         
         # Handle data source - DataFrame, file path, or file dialog
         if dataframe is not None:
@@ -209,6 +213,25 @@ class Plot3DApp:
         def on_kmeans_update(updated_df):
             self.df = updated_df
             self.refresh_plot()
+            
+            # Also update the parent worksheet if callback is provided
+            if self.worksheet_update_callback:
+                try:
+                    # Check if row selection info is available from K-means manager
+                    start_row = getattr(on_kmeans_update, '_kmeans_start_row', None)
+                    end_row = getattr(on_kmeans_update, '_kmeans_end_row', None)
+                    
+                    if start_row is not None and end_row is not None:
+                        # Pass row selection info to worksheet callback
+                        if hasattr(self.worksheet_update_callback, '__code__') and self.worksheet_update_callback.__code__.co_argcount > 2:
+                            self.worksheet_update_callback(updated_df, start_row, end_row)
+                        else:
+                            self.worksheet_update_callback(updated_df)
+                    else:
+                        self.worksheet_update_callback(updated_df)
+                    print(f"Successfully updated parent worksheet with {len(updated_df)} rows")
+                except Exception as e:
+                    print(f"Warning: Failed to update parent worksheet: {e}")
         
         # Initialize K-means manager with data and file path (if available)
         self.kmeans_manager = KmeansManager(on_data_update=on_kmeans_update)
@@ -1065,8 +1088,13 @@ class Plot3DApp:
     
     def _on_sphere_toggle(self, color: str):
         """Handle sphere visibility toggle."""
+        print(f"\n🔴 SPHERE TOGGLE DEBUG: {color}")
         if hasattr(self, 'sphere_manager'):
+            print(f"  Sphere manager exists, calling toggle_visibility({color})")
             self.sphere_manager.toggle_visibility(color)
+            print(f"  Toggle completed")
+        else:
+            print(f"  ❌ No sphere manager found!")
             
     def _init_ui(self):
         """
@@ -1321,9 +1349,34 @@ class Plot3DApp:
             command=self.refresh_plot
         ).grid(row=1, column=0, sticky='w', padx=5, pady=5)
 
+        # Create K-Means clustering GUI
+        if hasattr(self, 'kmeans_manager') and self.kmeans_manager:
+            kmeans_frame = self.kmeans_manager.create_gui(self.control_frame)
+            if kmeans_frame:
+                kmeans_frame.grid(row=10, column=0, sticky='ew', padx=5, pady=5)
+                print("K-Means clustering GUI created successfully")
+            else:
+                print("Warning: Failed to create K-Means clustering GUI")
+        else:
+            print("Warning: K-Means manager not available")
+        
+        # Create ΔE Manager GUI
+        if hasattr(self, 'delta_e_manager') and self.delta_e_manager:
+            try:
+                delta_e_frame = self.delta_e_manager.create_gui(self.control_frame)
+                if delta_e_frame:
+                    delta_e_frame.grid(row=11, column=0, sticky='ew', padx=5, pady=5)
+                    print("ΔE Manager GUI created successfully")
+                else:
+                    print("Warning: Failed to create ΔE Manager GUI")
+            except Exception as e:
+                print(f"Warning: Error creating ΔE Manager GUI: {e}")
+        else:
+            print("Warning: ΔE Manager not available")
+        
         # Create sphere visibility frame with scrollable content
         sphere_frame = ttk.LabelFrame(self.control_frame, text="Sphere Visibility")
-        sphere_frame.grid(row=10, column=0, sticky='nsew', padx=5, pady=5)
+        sphere_frame.grid(row=12, column=0, sticky='nsew', padx=5, pady=5)
 
         # Force minimum size and prevent frame from shrinking
         sphere_frame.grid_propagate(False)

@@ -131,9 +131,22 @@ class GroupDisplayManager:
             self.row_mapping = {}
             self.index_to_row = {}
             
-            # Check if we have an 'original_row' column for precise mapping
-            if 'original_row' in self.df.columns:
-                print("Group Display: Using 'original_row' column for precise row mapping")
+            # CRITICAL FIX: Check for _original_sheet_row column from internal worksheet
+            if '_original_sheet_row' in self.df.columns:
+                print("Group Display: Using '_original_sheet_row' column for precise row mapping (REALTIME WORKSHEET)")
+                for idx, row in self.df.iterrows():
+                    orig_sheet_row = int(row['_original_sheet_row'])
+                    # Display row = sheet row + 1 (sheet rows are 0-based, display rows are 1-based)
+                    display_row = orig_sheet_row + 1
+                    self.row_mapping[display_row] = idx
+                    self.index_to_row[idx] = display_row
+                    
+                    # DEBUG: Show the mapping for first few rows
+                    if idx < 5:
+                        print(f"Group Display DEBUG: Display row {display_row} → DataFrame index {idx} (sheet row {orig_sheet_row})")
+                        
+            elif 'original_row' in self.df.columns:
+                print("Group Display: Using 'original_row' column for precise row mapping (FILE-BASED)")
                 for idx, row in self.df.iterrows():
                     orig_row = int(row['original_row'])
                     # Adjust for header row (+1) and zero-indexing (+1) = +2
@@ -142,7 +155,7 @@ class GroupDisplayManager:
                     self.index_to_row[idx] = spreadsheet_row
             else:
                 # Fall back to default sequential mapping
-                print("Group Display: Using default sequential row mapping")
+                print("Group Display: Using default sequential row mapping (LEGACY - may be incorrect)")
                 # Row 2 in spreadsheet = index 0 in DataFrame (accounting for header row)
                 self.row_mapping = {i+2: i for i in range(df_length)}
                 self.index_to_row = {i: i+2 for i in range(df_length)}
@@ -298,13 +311,27 @@ class GroupDisplayManager:
         When disabled or no selection, all points are visible.
         When enabled, only selected points are visible.
         """
-        if not self.visibility_enabled.get():
+        enabled = self.visibility_enabled.get()
+        num_selected = len(self.visible_indices)
+        
+        print(f"\n🔍 GROUP DISPLAY MASK DEBUG:")
+        print(f"  Visibility enabled: {enabled}")
+        print(f"  Selected indices count: {num_selected}")
+        print(f"  Selected indices: {sorted(list(self.visible_indices)) if self.visible_indices else 'None'}")
+        
+        if not enabled:
             # When disabled, show all points
+            print(f"  → DISABLED: Showing all {len(self.df)} points")
             return pd.Series(True, index=self.df.index)
         
         # When enabled, only show selected points
         mask = pd.Series(False, index=self.df.index)  # Start with all False
         if self.visible_indices:
             mask.loc[list(self.visible_indices)] = True  # Set True for selected indices
+            visible_count = mask.sum()
+            print(f"  → ENABLED: Showing {visible_count}/{len(self.df)} points (only selected)")
+        else:
+            print(f"  → ENABLED: No selection, showing 0/{len(self.df)} points")
+        
         return mask
 
