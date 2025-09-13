@@ -212,7 +212,12 @@ class SphereManager:
                     sphere_val = row.get('Sphere', 'N/A')
                     radius_val = row.get('Radius', 'N/A') 
                     data_id = row.get('DataID', 'N/A')
-                    print(f"  Row {idx}: DataID={data_id}, Sphere='{sphere_val}', Radius='{radius_val}'")
+                    print(f"  Row {idx}: DataID={data_id}, Sphere='{sphere_val}', Radius='{radius_val}' (type: {type(radius_val)})")
+                    # Extra debug for radius conversion
+                    if pd.notna(radius_val):
+                        print(f"    Radius is NOT NaN - will use: {float(radius_val)}")
+                    else:
+                        print(f"    Radius IS NaN - will use default: {self.DEFAULT_RADIUS}")
             
             if len(centroid_data) == 0:
                 self.logger.info("No valid centroid data found for sphere rendering")

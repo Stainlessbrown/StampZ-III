@@ -382,7 +382,7 @@ class ColorAnalysisDB:
                             m.sphere_color, m.sphere_radius, m.trendline_valid
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
-                        ORDER BY s.image_name, m.coordinate_point, m.measurement_date
+                        ORDER BY m.measurement_date, s.image_name, m.coordinate_point
                     """)
                     
                     measurements = []
@@ -584,6 +584,172 @@ class ColorAnalysisDB:
                     
         except sqlite3.Error as e:
             print(f"Error updating marker/color preferences: {e}")
+            return False
+    
+    def insert_new_measurement(self, image_name: str, coordinate_point: int,
+                              x_pos: float, y_pos: float, l_value: float, a_value: float, b_value: float,
+                              rgb_r: float = 0.0, rgb_g: float = 0.0, rgb_b: float = 0.0,
+                              cluster_id: int = None, delta_e: float = None,
+                              centroid_x: float = None, centroid_y: float = None, centroid_z: float = None,
+                              sphere_color: str = None, sphere_radius: float = None,
+                              marker: str = '.', color: str = 'blue',
+                              sample_type: str = None, sample_size: str = None, sample_anchor: str = None,
+                              notes: str = None, trendline_valid: bool = True) -> bool:
+        """Insert a completely new measurement with all Plot_3D extended values.
+        
+        Args:
+            image_name: Name of the image
+            coordinate_point: Which coordinate point (1-based)
+            x_pos, y_pos: Position coordinates
+            l_value, a_value, b_value: CIE Lab values (required)
+            rgb_r, rgb_g, rgb_b: RGB values (optional, defaults to 0)
+            cluster_id: K-means cluster assignment
+            delta_e: ΔE value
+            centroid_x, centroid_y, centroid_z: Cluster centroid coordinates
+            sphere_color: Sphere visualization color
+            sphere_radius: Sphere visualization radius
+            marker: Marker preference
+            color: Color preference
+            sample_type, sample_size, sample_anchor: Sample metadata
+            notes: Optional notes
+            trendline_valid: Whether this point is valid for trendlines
+            
+        Returns:
+            True if insertion was successful
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # First, ensure the measurement set exists
+                set_id = self.create_measurement_set(image_name)
+                if not set_id:
+                    return False
+                
+                # Check if this measurement already exists
+                cursor = conn.execute("""
+                    SELECT id FROM color_measurements 
+                    WHERE set_id = ? AND coordinate_point = ?
+                """, (set_id, coordinate_point))
+                
+                if cursor.fetchone():
+                    logger.debug(f"Measurement {image_name} point {coordinate_point} already exists - use update_plot3d_extended_values instead")
+                    return False
+                
+                # Insert the new measurement with ALL extended values
+                conn.execute("""
+                    INSERT INTO color_measurements (
+                        set_id, coordinate_point, x_position, y_position,
+                        l_value, a_value, b_value, rgb_r, rgb_g, rgb_b,
+                        sample_type, sample_size, sample_anchor, notes,
+                        marker_preference, color_preference,
+                        cluster_id, delta_e, centroid_x, centroid_y, centroid_z,
+                        sphere_color, sphere_radius, trendline_valid
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    set_id, coordinate_point, x_pos, y_pos,
+                    l_value, a_value, b_value, rgb_r, rgb_g, rgb_b,
+                    sample_type, sample_size, sample_anchor, notes,
+                    marker, color,
+                    cluster_id, delta_e, centroid_x, centroid_y, centroid_z,
+                    sphere_color, sphere_radius, int(trendline_valid) if trendline_valid is not None else 1
+                ))
+                
+                print(f"✅ INSERTED new measurement: {image_name} point {coordinate_point} with Plot_3D data")
+                return True
+                
+        except sqlite3.Error as e:
+            logger.error(f"Error inserting new measurement: {e}")
+            return False
+    
+    def insert_or_update_centroid_data(self, cluster_id: int, centroid_x: float, centroid_y: float, centroid_z: float,
+                                      sphere_color: str = None, sphere_radius: float = None,
+                                      marker: str = '.', color: str = 'blue',
+                                      image_name_override: str = None) -> bool:
+        """Insert or update centroid data for sphere plotting.
+        
+        This method handles centroid data that may not be tied to specific sample measurements.
+        It creates special 'centroid' entries that can be visualized as spheres in Plot_3D.
+        
+        Args:
+            cluster_id: The cluster ID this centroid represents
+            centroid_x, centroid_y, centroid_z: Centroid coordinates
+            sphere_color: Color for sphere visualization
+            sphere_radius: Radius for sphere visualization
+            marker: Marker preference for plotting
+            color: Color preference for plotting
+            image_name_override: Override image name (defaults to 'CENTROIDS')
+            
+        Returns:
+            True if insertion/update was successful
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Use a special image name for centroid data
+                centroid_image_name = image_name_override or 'CENTROIDS'
+                
+                # Ensure the measurement set exists
+                set_id = self.create_measurement_set(centroid_image_name, description="Cluster centroids for sphere plotting")
+                if not set_id:
+                    return False
+                
+                # Use cluster_id as coordinate_point for centroids (unique per cluster)
+                coordinate_point = cluster_id
+                
+                # Check if this centroid already exists
+                cursor = conn.execute("""
+                    SELECT id FROM color_measurements 
+                    WHERE set_id = ? AND coordinate_point = ?
+                """, (set_id, coordinate_point))
+                
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing centroid
+                    conn.execute("""
+                        UPDATE color_measurements SET
+                            centroid_x = ?, centroid_y = ?, centroid_z = ?,
+                            sphere_color = ?, sphere_radius = ?,
+                            marker_preference = ?, color_preference = ?,
+                            cluster_id = ?,
+                            measurement_date = datetime('now', 'localtime')
+                        WHERE set_id = ? AND coordinate_point = ?
+                    """, (
+                        centroid_x, centroid_y, centroid_z,
+                        sphere_color, sphere_radius,
+                        marker, color, cluster_id,
+                        set_id, coordinate_point
+                    ))
+                    print(f"✅ UPDATED centroid for cluster {cluster_id}: ({centroid_x:.3f}, {centroid_y:.3f}, {centroid_z:.3f})")
+                else:
+                    # Insert new centroid (using centroid coords as Lab values for compatibility)
+                    # Handle None values gracefully - Plot_3D will filter out NaN entries
+                    x_pos = centroid_x if centroid_x is not None else 0.0
+                    y_pos = centroid_y if centroid_y is not None else 0.0
+                    l_val = centroid_x if centroid_x is not None else 0.0
+                    a_val = centroid_y if centroid_y is not None else 0.0
+                    b_val = centroid_z if centroid_z is not None else 0.0
+                    
+                    conn.execute("""
+                        INSERT INTO color_measurements (
+                            set_id, coordinate_point, x_position, y_position,
+                            l_value, a_value, b_value, rgb_r, rgb_g, rgb_b,
+                            sample_type, marker_preference, color_preference,
+                            cluster_id, centroid_x, centroid_y, centroid_z,
+                            sphere_color, sphere_radius, trendline_valid
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        set_id, coordinate_point, x_pos, y_pos,  # Use centroid coords as x,y position (or 0.0)
+                        l_val, a_val, b_val,  # Centroid coords as Lab values (or 0.0)
+                        0.0, 0.0, 0.0,  # RGB not applicable for centroids
+                        'centroid', marker, color,
+                        cluster_id, centroid_x, centroid_y, centroid_z,  # Store original values (may be None)
+                        sphere_color, sphere_radius, 1  # Centroids are always trendline-valid
+                    ))
+                    print(f"✅ INSERTED new centroid for cluster {cluster_id}: ({centroid_x:.3f}, {centroid_y:.3f}, {centroid_z:.3f})")
+                
+                return True
+                
+        except sqlite3.Error as e:
+            logger.error(f"Error inserting/updating centroid data: {e}")
             return False
     
     def update_plot3d_extended_values(self, image_name: str, coordinate_point: int,

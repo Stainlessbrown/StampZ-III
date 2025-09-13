@@ -269,10 +269,18 @@ class RealtimePlot3DSheet:
                 print(f"DEBUG: Setting up marker dropdowns - sheet has {current_sheet_rows} rows, will create dropdowns for rows 8-{max_data_rows-1}")
                 
                 for row in range(7, max_data_rows):  # Start from row 7 = display row 8
+                    # Get existing value to preserve it, or use default if empty
+                    try:
+                        current_value = self.sheet.get_cell_data(row, 6)
+                        if not current_value or current_value.strip() == '':
+                            current_value = '.'
+                    except:
+                        current_value = '.'
+                    
                     self.sheet.create_dropdown(
                         r=row, c=6,
                         values=self.VALID_MARKERS,
-                        set_value='.',
+                        set_value=current_value,
                         redraw=False
                     )
                 print(f"DEBUG: Marker dropdowns created for rows 8-{max_data_rows} (starting at data row 8)")
@@ -283,10 +291,18 @@ class RealtimePlot3DSheet:
             try:
                 max_data_rows = max(50, self.sheet.get_total_rows())
                 for row in range(7, max_data_rows):
+                    # Get existing value to preserve it, or use default if empty
+                    try:
+                        current_value = self.sheet.get_cell_data(row, 7)
+                        if not current_value or current_value.strip() == '':
+                            current_value = 'blue'
+                    except:
+                        current_value = 'blue'
+                    
                     self.sheet.create_dropdown(
                         r=row, c=7,
                         values=self.VALID_COLORS,
-                        set_value='blue',
+                        set_value=current_value,
                         redraw=False
                     )
                 print(f"DEBUG: Color dropdowns created for rows 8-{max_data_rows} (starting at data row 8)")
@@ -297,10 +313,18 @@ class RealtimePlot3DSheet:
             try:
                 max_data_rows = max(50, self.sheet.get_total_rows())
                 for row in range(1, max_data_rows):
+                    # Get existing value to preserve it, or use default if empty
+                    try:
+                        current_value = self.sheet.get_cell_data(row, 11)
+                        if not current_value or current_value.strip() == '':
+                            current_value = ''
+                    except:
+                        current_value = ''
+                    
                     self.sheet.create_dropdown(
                         r=row, c=11,
                         values=self.VALID_SPHERES,
-                        set_value='',
+                        set_value=current_value,
                         redraw=False
                     )
                 print(f"DEBUG: Sphere dropdowns created for rows 2-{max_data_rows}")
@@ -409,17 +433,23 @@ class RealtimePlot3DSheet:
                 current_rows = self.sheet.get_total_rows()
                 print(f"  Current sheet has {current_rows} rows")
                 
-                # REVERTED: Use simpler clearing approach that was working before
-                print(f"  Using simpler data clearing approach...")
+                # IMPROVED: Only clear rows that will be overwritten with database data
+                print(f"  Using selective data clearing approach...")
                 try:
-                    # Just clear the data content, don't rebuild the entire sheet structure
-                    if current_rows > 7:
-                        for row_idx in range(7, current_rows):
+                    # MINIMAL clearing: Only clear rows that will definitely be overwritten
+                    # This maximally preserves user's intentional blank rows
+                    regular_measurements_count = len([m for m in measurements if m.get('image_name') != 'CENTROIDS']) if measurements else 0
+                    
+                    # Only clear the exact number of rows we'll populate (no buffer)
+                    rows_to_clear = min(regular_measurements_count, current_rows - 7)
+                    
+                    if current_rows > 7 and rows_to_clear > 0:
+                        for row_idx in range(7, 7 + rows_to_clear):
                             empty_row = [''] * len(self.PLOT3D_COLUMNS)
                             self.sheet.set_row_data(row_idx, values=empty_row)
-                        print(f"  ✅ Cleared data rows 7-{current_rows-1}")
+                        print(f"  ✅ Cleared {rows_to_clear} data rows (7-{6+rows_to_clear}) - preserving ALL empty rows beyond")
                     else:
-                        print(f"  Sheet only has {current_rows} rows, no data to clear")
+                        print(f"  No rows to clear - preserving all user data")
                 except Exception as simple_clear_error:
                     print(f"  ⚠️ Simple clear failed: {simple_clear_error}")
                 
@@ -444,9 +474,52 @@ class RealtimePlot3DSheet:
             
             logger.info(f"Processing {len(measurements)} measurements")
             
-            # Convert to Plot_3D format
+            # Separate CENTROIDS from regular measurements
+            centroid_measurements = [m for m in measurements if m.get('image_name') == 'CENTROIDS']
+            regular_measurements = [m for m in measurements if m.get('image_name') != 'CENTROIDS']
+            
+            print(f"\n📊 MEASUREMENT SEPARATION:")
+            print(f"  CENTROIDS entries: {len(centroid_measurements)}")
+            print(f"  Regular measurements: {len(regular_measurements)}")
+            
+            # Process CENTROIDS first - place them in centroid area (rows 1-6)
+            for centroid in centroid_measurements:
+                try:
+                    cluster_id = centroid.get('cluster_id')
+                    if cluster_id is not None and 0 <= cluster_id <= 5:  # Valid centroid area
+                        centroid_row_idx = 1 + cluster_id  # Row 1-6 (display 2-7)
+                        
+                        # Build centroid row with proper data
+                        centroid_row = [
+                            '',  # Xnorm - empty for centroids
+                            '',  # Ynorm - empty for centroids
+                            '',  # Znorm - empty for centroids
+                            '',  # DataID - empty for centroids (they don't need DataID)
+                            str(cluster_id),  # Cluster
+                            '',  # ΔE - empty for centroids
+                            '',  # Marker - empty for centroids (spheres don't use markers)
+                            '',  # Color - empty for centroids (spheres use sphere_color instead)
+                            str(centroid.get('centroid_x')) if centroid.get('centroid_x') is not None else '',  # Centroid_X
+                            str(centroid.get('centroid_y')) if centroid.get('centroid_y') is not None else '',  # Centroid_Y
+                            str(centroid.get('centroid_z')) if centroid.get('centroid_z') is not None else '',  # Centroid_Z
+                            centroid.get('sphere_color', ''),  # Sphere
+                            str(centroid.get('sphere_radius')) if centroid.get('sphere_radius') is not None else ''  # Radius
+                        ]
+                        
+                        # Set centroid data in worksheet
+                        self.sheet.set_row_data(centroid_row_idx, values=centroid_row)
+                        print(f"    ✅ CENTROID cluster {cluster_id} → row {centroid_row_idx} (display {centroid_row_idx+1})")
+                        print(f"      Centroid: ({centroid.get('centroid_x')}, {centroid.get('centroid_y')}, {centroid.get('centroid_z')})")
+                        print(f"      Sphere: {centroid.get('sphere_color')}, radius: {centroid.get('sphere_radius')}")
+                    else:
+                        print(f"    ⚠️ CENTROID cluster {cluster_id} out of range [0-5], skipping")
+                        
+                except Exception as centroid_error:
+                    print(f"    ❌ Error processing CENTROID: {centroid_error}")
+            
+            # Convert regular measurements to Plot_3D format for data area
             data_rows = []
-            for i, measurement in enumerate(measurements):
+            for i, measurement in enumerate(regular_measurements):
                 try:
                     # Debug the measurement structure
                     logger.debug(f"Processing measurement {i}: keys={list(measurement.keys())}")
@@ -455,28 +528,42 @@ class RealtimePlot3DSheet:
                     l_val = measurement.get('l_value', 0.0)
                     a_val = measurement.get('a_value', 0.0)
                     b_val = measurement.get('b_value', 0.0)
+                    sample_type = measurement.get('sample_type', '')
+                    
+                    # CRITICAL FIX: Detect if data is already normalized (from manual entry)
+                    # Manual entries have sample_type='manual_entry' and values in 0-1 range
+                    is_manual_entry = (sample_type == 'manual_entry')
+                    is_already_normalized = (is_manual_entry and 
+                                           0 <= l_val <= 1 and 
+                                           0 <= a_val <= 1 and 
+                                           0 <= b_val <= 1)
                     
                     # Apply normalization based on user preference  
-                    if use_normalized:
+                    if use_normalized and not is_already_normalized:
                         # Normalize: L* (0-100) → (0-1), a*b* (-128 to +127) → (0-1)
-                        # REVERTED: Back to original working logic with proper 0.0 handling
+                        # Only normalize if data is NOT already normalized
                         x_norm = l_val / 100.0 if l_val is not None else 0.0
                         y_norm = (a_val + 128) / 256.0 if a_val is not None else 0.5
                         z_norm = (b_val + 128) / 256.0 if b_val is not None else 0.5
+                        
+                        logger.info(f"NORMALIZED: Measurement {i+1}: L*={l_val:.2f} a*={a_val:.2f} b*={b_val:.2f} → X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
+                    elif is_already_normalized:
+                        # Data is already normalized, use as-is
+                        x_norm = l_val
+                        y_norm = a_val  
+                        z_norm = b_val
+                        
+                        logger.info(f"ALREADY NORMALIZED: Measurement {i+1}: using values as-is X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
+                    else:
+                        # Use raw Lab values 
+                        x_norm = l_val if l_val is not None else 0.0
+                        y_norm = a_val if a_val is not None else 0.0
+                        z_norm = b_val if b_val is not None else 0.0
                         
                         # Constrain to 0-1 range for safety
                         x_norm = max(0.0, min(1.0, x_norm))
                         y_norm = max(0.0, min(1.0, y_norm))
                         z_norm = max(0.0, min(1.0, z_norm))
-                        
-                        logger.info(f"NORMALIZED: Measurement {i+1}: L*={l_val:.2f} a*={a_val:.2f} b*={b_val:.2f} → X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
-                    else:
-                        # Use raw Lab values
-                        x_norm = l_val if l_val is not None else 0.0
-                        y_norm = a_val if a_val is not None else 0.0
-                        z_norm = b_val if b_val is not None else 0.0
-                        
-                        logger.info(f"RAW LAB: Measurement {i+1}: L*={l_val:.2f} a*={a_val:.2f} b*={b_val:.2f} → X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
                     
                     # CRITICAL FIX: Create proper DataID that matches database format
                     # Database stores image_name + coordinate_point separately
@@ -484,8 +571,12 @@ class RealtimePlot3DSheet:
                     image_name = measurement.get('image_name', f"{self.sample_set_name}_Sample_{i+1:03d}")
                     coordinate_point = measurement.get('coordinate_point', 1)
                     
-                    # Create DataID in format that matches database expectations: "S10_pt1", "S10_pt2", etc.
-                    data_id = f"{image_name}_pt{coordinate_point}"
+                    # Create DataID - only add _pt suffix if coordinate_point > 1 or follows traditional pattern
+                    if coordinate_point > 1 or ('_pt' in image_name):
+                        data_id = f"{image_name}_pt{coordinate_point}"
+                    else:
+                        # Simple single-point entries: keep original name clean
+                        data_id = image_name
                     
                     # Get saved Plot_3D data (move BEFORE the debug logging)
                     saved_marker = measurement.get('marker_preference', '.')
@@ -502,6 +593,8 @@ class RealtimePlot3DSheet:
                     if i < 10:  # Only show first 10 to avoid spam
                         logger.info(f"DATAID FIX: Measurement {i+1}: image_name='{image_name}', coord_pt={coordinate_point} → DataID='{data_id}'")
                         logger.info(f"PLOT3D RESTORE: cluster={saved_cluster}, ∆E={saved_delta_e}, marker={saved_marker}, color={saved_color}, sphere={saved_sphere_color}")
+                        if saved_sphere_radius is not None and str(saved_sphere_radius).strip():
+                            logger.info(f"RADIUS DEBUG: Raw radius from DB: '{saved_sphere_radius}' (type: {type(saved_sphere_radius)})")
                     
                     # Variables already defined above - no need to redefine
                     
@@ -640,11 +733,65 @@ class RealtimePlot3DSheet:
         """Legacy auto-save method for backward compatibility."""
         self._auto_save_changes()
     
+    def _validate_new_data_row(self, data_id: str, x_pos: float, y_pos: float, z_pos: float, 
+                              image_name: str, coord_point: int) -> tuple:
+        """Validate new data row for insertion.
+        
+        Args:
+            data_id: The DataID string
+            x_pos, y_pos, z_pos: Coordinate values
+            image_name: Parsed image name
+            coord_point: Parsed coordinate point
+            
+        Returns:
+            Tuple of (is_valid: bool, error_message: str)
+        """
+        # Check DataID format - accept any non-empty alphanumeric string
+        if not data_id or not str(data_id).strip():
+            return False, f"DataID cannot be empty"
+        
+        # Allow any alphanumeric characters, underscores, periods, hyphens
+        import re
+        if not re.match(r'^[a-zA-Z0-9_.\-]+$', str(data_id).strip()):
+            return False, f"Invalid DataID format: '{data_id}' (use letters, numbers, dots, underscores, hyphens only)"
+        
+        # Check coordinate values are numeric and reasonable
+        coord_checks = [
+            (x_pos, 'X'),
+            (y_pos, 'Y'),
+            (z_pos, 'Z')
+        ]
+        
+        for coord_val, coord_name in coord_checks:
+            if coord_val is None:
+                return False, f"Missing {coord_name} coordinate"
+            
+            if not isinstance(coord_val, (int, float)):
+                return False, f"Invalid {coord_name} coordinate: must be numeric"
+            
+            # Check for reasonable ranges (typical Lab* color space ranges)
+            if coord_name == 'X' and not (0 <= coord_val <= 100):  # L* typically 0-100
+                print(f"    ⚠️ Warning: {coord_name} coordinate {coord_val} is outside typical range [0, 100]")
+            elif coord_name in ['Y', 'Z'] and not (-128 <= coord_val <= 127):  # a*, b* typically -128 to 127
+                print(f"    ⚠️ Warning: {coord_name} coordinate {coord_val} is outside typical range [-128, 127]")
+        
+        # Check image name is reasonable
+        if not image_name or len(image_name.strip()) == 0:
+            return False, "Empty image name"
+        
+        # Check coordinate point is valid
+        if not isinstance(coord_point, int) or coord_point <= 0:
+            return False, f"Invalid coordinate point: {coord_point} (should be positive integer)"
+        
+        return True, "Valid"
+    
     def _save_to_internal_database(self):
         """Save current spreadsheet changes back to the StampZ database.
         
         Now saves ALL Plot_3D columns: Cluster, ΔE, Centroid, Sphere, Radius, Marker, Color, etc.
         This ensures complete persistence of manual edits and Plot_3D analysis results.
+        
+        Enhanced to handle NEW DATA INSERTION when measurements don't exist in database.
         """
         try:
             print(f"\n💾 COMPREHENSIVE DATABASE SAVE:")
@@ -665,7 +812,90 @@ class RealtimePlot3DSheet:
                 if not row_data or len(row_data) < len(self.PLOT3D_COLUMNS):
                     skipped_rows += 1
                     continue
+                
+                # DEBUG: Show what we're processing for each row
+                if i < 10:  # Debug first 10 rows
+                    print(f"    DEBUG Row {i} (display {i+1}): {row_data[:8] if len(row_data) >= 8 else row_data}...")
+                
+                # CRITICAL FIX: Handle centroid area (rows 1-6) vs data area (rows 7+) differently
+                is_centroid_area = (1 <= i <= 6)  # Rows 2-7 in display (0-indexed rows 1-6)
+                is_data_area = (i >= 7)  # Rows 8+ in display (0-indexed rows 7+)
+                
+                print(f"    Row {i}: is_centroid_area={is_centroid_area}, is_data_area={is_data_area}")
+                
+                if is_centroid_area:
+                    # Handle centroid area - only process if there's centroid data
+                    cluster = row_data[4] if len(row_data) > 4 and row_data[4] else None
+                    centroid_x = row_data[8] if len(row_data) > 8 and row_data[8] else None
+                    centroid_y = row_data[9] if len(row_data) > 9 and row_data[9] else None
+                    centroid_z = row_data[10] if len(row_data) > 10 and row_data[10] else None
+                    sphere_color = row_data[11] if len(row_data) > 11 and row_data[11] else None
+                    sphere_radius = row_data[12] if len(row_data) > 12 and row_data[12] else None
+                    marker = row_data[6] if len(row_data) > 6 and row_data[6] else '.'
+                    color = row_data[7] if len(row_data) > 7 and row_data[7] else 'blue'
                     
+                    # Process if we have ANY meaningful centroid data
+                    # Allow partial data - user might be building it up incrementally
+                    has_cluster = cluster is not None and str(cluster).strip()
+                    has_centroid = (centroid_x is not None and str(centroid_x).strip() and
+                                  centroid_y is not None and str(centroid_y).strip() and
+                                  centroid_z is not None and str(centroid_z).strip())
+                    has_sphere_data = ((sphere_color is not None and str(sphere_color).strip()) or
+                                     (sphere_radius is not None and str(sphere_radius).strip()))
+                    
+                    # Process if we have at least cluster + centroid coordinates, or any sphere data with cluster
+                    if (has_cluster and has_centroid) or (has_cluster and has_sphere_data):
+                        
+                        try:
+                            cluster_id = int(float(str(cluster).strip()))
+                            
+                            # Handle centroid coordinates - use None if not provided
+                            centroid_x_val = float(str(centroid_x).strip()) if centroid_x and str(centroid_x).strip() else None
+                            centroid_y_val = float(str(centroid_y).strip()) if centroid_y and str(centroid_y).strip() else None
+                            centroid_z_val = float(str(centroid_z).strip()) if centroid_z and str(centroid_z).strip() else None
+                            
+                            # Handle sphere data
+                            sphere_radius_val = None
+                            if sphere_radius and str(sphere_radius).strip():
+                                sphere_radius_val = float(str(sphere_radius).strip())
+                            sphere_color_val = str(sphere_color).strip() if sphere_color and str(sphere_color).strip() else None
+                            
+                            print(f"    🎯 Row {i} (CENTROID AREA): Processing cluster {cluster_id} centroid data")
+                            
+                            # Call insertion - Plot_3D will ignore NaN values appropriately
+                            centroid_success = db.insert_or_update_centroid_data(
+                                cluster_id=cluster_id,
+                                centroid_x=centroid_x_val,
+                                centroid_y=centroid_y_val,
+                                centroid_z=centroid_z_val,
+                                sphere_color=sphere_color_val,
+                                sphere_radius=sphere_radius_val,
+                                marker=marker,
+                                color=color
+                            )
+                            
+                            if centroid_success:
+                                updated_count += 1
+                                coord_str = f"({centroid_x_val:.3f}, {centroid_y_val:.3f}, {centroid_z_val:.3f})" if all(v is not None for v in [centroid_x_val, centroid_y_val, centroid_z_val]) else "(partial)"
+                                sphere_str = f", sphere={sphere_color_val}, radius={sphere_radius_val}" if sphere_color_val or sphere_radius_val else ""
+                                print(f"    ✅ Row {i}: CENTROID saved for cluster {cluster_id} - {coord_str}{sphere_str}")
+                            else:
+                                print(f"    ❌ Row {i}: CENTROID save failed for cluster {cluster_id}")
+                                
+                        except (ValueError, TypeError) as e:
+                            print(f"    ❌ Row {i}: Invalid centroid data - {e}")
+                            skipped_rows += 1
+                    else:
+                        # Empty centroid row, skip silently
+                        skipped_rows += 1
+                    continue  # Skip to next row, don't process as regular data
+                    
+                elif not is_data_area:
+                    # Skip rows 0 (header) and any other non-data/non-centroid rows
+                    skipped_rows += 1
+                    continue
+                
+                # DATA AREA PROCESSING (rows 7+ only)
                 # Extract ALL data columns from the worksheet
                 try:
                     # Column indices based on self.PLOT3D_COLUMNS order
@@ -681,26 +911,30 @@ class RealtimePlot3DSheet:
                     sphere_radius = row_data[12] if len(row_data) > 12 and row_data[12] else None # Radius
                     
                     # Skip rows without valid DataID
-                    if not data_id or '_pt' not in data_id:
+                    if not data_id or not str(data_id).strip():
                         if i < 10:  # Show first 10 for debugging
-                            logger.debug(f"Row {i}: Skipping - no valid DataID ('{data_id}')")
+                            logger.debug(f"Row {i}: Skipping - no DataID")
                         skipped_rows += 1
                         continue
-                        
-                    # Parse DataID format: "S10_pt1", "S12_pt3", etc.
-                    parts = data_id.split('_pt')
-                    if len(parts) != 2:
-                        logger.debug(f"Row {i}: Could not parse DataID: {data_id}")
-                        skipped_rows += 1
-                        continue
-                        
-                    try:
-                        image_name = parts[0]  # "S10", "S12", etc.
-                        coord_point = int(parts[1])  # 1, 2, 3, 4, 5
-                    except ValueError:
-                        logger.debug(f"Row {i}: Invalid coordinate point in {data_id}")
-                        skipped_rows += 1
-                        continue
+                    
+                    # Use flexible DataID handling - support any alphanumeric name
+                    data_id = str(data_id).strip()
+                    
+                    # Try to parse traditional _pt format first, fallback to flexible format
+                    if '_pt' in data_id and data_id.count('_pt') == 1:
+                        # Traditional format: "S10_pt1", "S12_pt3", etc.
+                        parts = data_id.split('_pt')
+                        try:
+                            image_name = parts[0]
+                            coord_point = int(parts[1])
+                        except (ValueError, IndexError):
+                            # Fallback to flexible format
+                            image_name = data_id
+                            coord_point = 1  # Default coordinate point
+                    else:
+                        # Flexible format: "Moe", "Larry", "King_Louis_IX", etc.
+                        image_name = data_id
+                        coord_point = 1  # Default coordinate point
                     
                     # Convert values to proper types
                     cluster_id = None
@@ -749,7 +983,34 @@ class RealtimePlot3DSheet:
                     if sphere_color and str(sphere_color).strip():
                         sphere_color_val = str(sphere_color).strip()
                     
-                    # Update the database with ALL Plot_3D extended values
+                    # Extract X/Y/Z coordinates from the worksheet for potential new data insertion
+                    x_pos = row_data[0] if len(row_data) > 0 and row_data[0] else None
+                    y_pos = row_data[1] if len(row_data) > 1 and row_data[1] else None
+                    z_pos = row_data[2] if len(row_data) > 2 and row_data[2] else None
+                    
+                    # Convert coordinate values to proper types
+                    x_pos_val = None
+                    if x_pos and str(x_pos).strip():
+                        try:
+                            x_pos_val = float(str(x_pos).strip())
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    y_pos_val = None
+                    if y_pos and str(y_pos).strip():
+                        try:
+                            y_pos_val = float(str(y_pos).strip())
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    z_pos_val = None
+                    if z_pos and str(z_pos).strip():
+                        try:
+                            z_pos_val = float(str(z_pos).strip())
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    # First, try to update existing measurement
                     success = db.update_plot3d_extended_values(
                         image_name=image_name,
                         coordinate_point=coord_point,
@@ -767,11 +1028,80 @@ class RealtimePlot3DSheet:
                     
                     if success:
                         updated_count += 1
-                        if updated_count <= 5:  # Show first 5 for debugging
-                            logger.info(f"✅ Row {i}: Saved {image_name} pt{coord_point} - cluster={cluster_id}, ΔE={delta_e_val}, marker={marker}, color={color}")
+                        print(f"    ✅ Row {i}: UPDATED {image_name} pt{coord_point} - cluster={cluster_id}, ∆E={delta_e_val}, marker={marker}, color={color}")
                     else:
-                        if updated_count <= 5:  # Show first 5 failures for debugging
-                            logger.debug(f"❌ Row {i}: Failed to save {image_name} pt{coord_point}")
+                        # Update failed - this might be NEW DATA that needs INSERTION
+                        print(f"    🔄 Row {i}: UPDATE FAILED for {image_name} pt{coord_point} - attempting INSERTION of new data")
+                        
+                        # Validate that we have minimum required data for insertion
+                        if x_pos_val is not None and y_pos_val is not None and z_pos_val is not None:
+                            # Validate the new data before insertion
+                            is_valid, validation_msg = self._validate_new_data_row(
+                                data_id, x_pos_val, y_pos_val, z_pos_val, image_name, coord_point
+                            )
+                            
+                            if not is_valid:
+                                print(f"    ❌ Row {i}: DATA VALIDATION FAILED - {validation_msg}")
+                                skipped_rows += 1
+                                continue
+                            
+                            # We have valid coordinate data - attempt to insert new measurement
+                            print(f"    ✅ Row {i}: Data validation passed - proceeding with insertion")
+                            insert_success = db.insert_new_measurement(
+                                image_name=image_name,
+                                coordinate_point=coord_point,
+                                x_pos=x_pos_val or 0.0,
+                                y_pos=y_pos_val or 0.0,
+                                l_value=x_pos_val or 0.0,  # Use X as L for Plot_3D compatibility
+                                a_value=y_pos_val or 0.0,  # Use Y as A
+                                b_value=z_pos_val or 0.0,  # Use Z as B
+                                rgb_r=0.0, rgb_g=0.0, rgb_b=0.0,  # Default RGB values
+                                cluster_id=cluster_id,
+                                delta_e=delta_e_val,
+                                centroid_x=centroid_x_val,
+                                centroid_y=centroid_y_val,
+                                centroid_z=centroid_z_val,
+                                sphere_color=sphere_color_val,
+                                sphere_radius=sphere_radius_val,
+                                marker=marker,
+                                color=color,
+                                sample_type='manual_entry',
+                                notes=f'Added via internal worksheet row {i+1}'
+                            )
+                            
+                            if insert_success:
+                                updated_count += 1
+                                print(f"    ✅ Row {i}: INSERTED NEW {image_name} pt{coord_point} - X={x_pos_val}, Y={y_pos_val}, Z={z_pos_val}, cluster={cluster_id}")
+                            else:
+                                print(f"    ❌ Row {i}: INSERTION ALSO FAILED for {image_name} pt{coord_point}")
+                                print(f"      DataID: {data_id}")
+                                print(f"      Coordinates: X={x_pos_val}, Y={y_pos_val}, Z={z_pos_val}")
+                                print(f"      Extended: marker={marker}, color={color}, cluster={cluster_id}, ∆E={delta_e_val}")
+                        else:
+                            # Check if this might be centroid data (has centroid coordinates but no sample coordinates)
+                            if centroid_x_val is not None and centroid_y_val is not None and centroid_z_val is not None and cluster_id is not None:
+                                print(f"    🎯 Row {i}: Detected CENTROID DATA for cluster {cluster_id}")
+                                centroid_success = db.insert_or_update_centroid_data(
+                                    cluster_id=cluster_id,
+                                    centroid_x=centroid_x_val,
+                                    centroid_y=centroid_y_val,
+                                    centroid_z=centroid_z_val,
+                                    sphere_color=sphere_color_val,
+                                    sphere_radius=sphere_radius_val,
+                                    marker=marker,
+                                    color=color
+                                )
+                                
+                                if centroid_success:
+                                    updated_count += 1
+                                    print(f"    ✅ Row {i}: CENTROID DATA saved for cluster {cluster_id} - ({centroid_x_val:.3f}, {centroid_y_val:.3f}, {centroid_z_val:.3f})")
+                                else:
+                                    print(f"    ❌ Row {i}: CENTROID INSERTION FAILED for cluster {cluster_id}")
+                            else:
+                                print(f"    ⚠️ Row {i}: INSUFFICIENT DATA for insertion - need X/Y/Z coordinates OR centroid data")
+                                print(f"      DataID: {data_id}")
+                                print(f"      Coordinates: X={x_pos_val}, Y={y_pos_val}, Z={z_pos_val}")
+                                print(f"      Centroid: ({centroid_x_val}, {centroid_y_val}, {centroid_z_val}), cluster={cluster_id}")
                         
                 except Exception as row_error:
                     logger.debug(f"Row {i}: Error processing - {row_error}")
@@ -863,14 +1193,23 @@ class RealtimePlot3DSheet:
             # Clean the data - remove completely empty rows and replace empty strings with NaN
             df = df.replace('', np.nan)
             
-            # Keep rows that have at least some coordinate data
+            # Keep rows that have coordinate data OR centroid data
             coordinate_cols = ['Xnorm', 'Ynorm', 'Znorm']
+            centroid_cols = ['Centroid_X', 'Centroid_Y', 'Centroid_Z']
+            
             has_coordinate_data = df[coordinate_cols].notna().any(axis=1)
+            has_centroid_data = df[centroid_cols].notna().all(axis=1)  # All 3 centroid coords must be present
+            
+            # Keep rows with either coordinate data OR complete centroid data
+            has_valid_data = has_coordinate_data | has_centroid_data
+            
+            print(f"  Filtering: coordinate_data={has_coordinate_data.sum()}, centroid_data={has_centroid_data.sum()}, total_kept={has_valid_data.sum()}")
             
             # CRITICAL FIX: Preserve original sheet row positions before filtering
             df['_original_sheet_row'] = df.index  # Store original sheet row indices
             
-            df = df[has_coordinate_data].copy()
+            # Filter using the new logic that includes centroid data
+            df = df[has_valid_data].copy()
             
             # Reset index to ensure consecutive numbering starting from 0
             # This prevents "positional indexers are out-of-bounds" errors in K-means clustering
@@ -888,6 +1227,10 @@ class RealtimePlot3DSheet:
             numeric_cols = ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', '∆E', 'Radius']
             for col in numeric_cols:
                 if col in df.columns:
+                    # For Radius column, preserve valid numeric values and convert empty strings to NaN properly
+                    if col == 'Radius':
+                        # Debug: Check what we're converting
+                        print(f"DEBUG: Converting {col} column - sample values: {df[col].head().tolist()}")
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
             # Set default values for missing data
@@ -2042,9 +2385,9 @@ class RealtimePlot3DSheet:
         """Save current spreadsheet changes to internal database (manual save).
         
         This is the explicit "Save Changes to DB" button that saves ALL Plot_3D data
-        (clusters, ΔE, centroids, spheres, etc.) to the internal StampZ database.
+        (clusters, ∆E, centroids, spheres, etc.) to the internal StampZ database.
         """
-        print("\n💾 MANUAL SAVE TO DATABASE TRIGGERED")
+        print("\n💾 MANUAL SAVE TO DATABASE TRIGGERED - DEV VERSION 2025-01-13")
         try:
             # Always save to internal database first (this is the primary action)
             self._save_to_internal_database()
