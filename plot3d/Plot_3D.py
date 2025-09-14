@@ -84,6 +84,10 @@ class Plot3DApp:
         # Store the worksheet update callback for bidirectional data flow
         self.worksheet_update_callback = worksheet_update_callback
         
+        # Detect realtime mode (when DataFrame is provided with callback)
+        # In realtime mode, we'll disable K-means and ΔE due to indexing complexity
+        self.is_realtime_mode = (dataframe is not None and worksheet_update_callback is not None)
+        
         # Handle data source - DataFrame, file path, or file dialog
         if dataframe is not None:
             # Direct DataFrame integration (no file needed!)
@@ -1370,19 +1374,21 @@ class Plot3DApp:
             command=self.refresh_plot
         ).grid(row=1, column=0, sticky='w', padx=5, pady=5)
 
-        # Create K-Means clustering GUI
-        if hasattr(self, 'kmeans_manager') and self.kmeans_manager:
+        # Create K-Means clustering GUI (disabled in realtime mode due to indexing complexity)
+        if not self.is_realtime_mode and hasattr(self, 'kmeans_manager') and self.kmeans_manager:
             kmeans_frame = self.kmeans_manager.create_gui(self.control_frame)
             if kmeans_frame:
                 kmeans_frame.grid(row=10, column=0, sticky='ew', padx=5, pady=5)
                 print("K-Means clustering GUI created successfully")
             else:
                 print("Warning: Failed to create K-Means clustering GUI")
+        elif self.is_realtime_mode:
+            print("K-Means clustering disabled in realtime mode (use external .ods files for K-means)")
         else:
             print("Warning: K-Means manager not available")
         
-        # Create ΔE Manager GUI
-        if hasattr(self, 'delta_e_manager') and self.delta_e_manager:
+        # Create ΔE Manager GUI (disabled in realtime mode due to indexing complexity)
+        if not self.is_realtime_mode and hasattr(self, 'delta_e_manager') and self.delta_e_manager:
             try:
                 delta_e_frame = self.delta_e_manager.create_gui(self.control_frame)
                 if delta_e_frame:
@@ -1392,6 +1398,8 @@ class Plot3DApp:
                     print("Warning: Failed to create ΔE Manager GUI")
             except Exception as e:
                 print(f"Warning: Error creating ΔE Manager GUI: {e}")
+        elif self.is_realtime_mode:
+            print("ΔE Manager disabled in realtime mode (use external .ods files for ΔE analysis)")
         else:
             print("Warning: ΔE Manager not available")
         
