@@ -32,10 +32,11 @@ class ImportResult:
 class ExternalDataImporter:
     """Import external CSV/ODS data into realtime datasheet format."""
     
-    # Expected realtime datasheet columns in order
+    # Expected realtime datasheet columns in order (must match PLOT3D_COLUMNS exactly)
     REALTIME_COLUMNS = [
-        'Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', 'Centroid_X', 
-        'Centroid_Y', 'Centroid_Z', 'Marker', 'Color', 'DeltaE', 'Sphere'
+        'Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', 
+        '∆E', 'Marker', 'Color', 'Centroid_X', 'Centroid_Y', 
+        'Centroid_Z', 'Sphere', 'Radius'
     ]
     
     # Common column name mappings for various input formats
@@ -51,7 +52,7 @@ class ExternalDataImporter:
         'Centroid_Z': ['Centroid_Z', 'CentroidZ', 'Cent_Z'],
         'Marker': ['Marker', 'Symbol', 'Shape'],
         'Color': ['Color', 'Colour'],
-        'DeltaE': ['DeltaE', 'Delta_E', 'ΔE', 'dE'],
+        '∆E': ['DeltaE', 'Delta_E', '∆E', 'ΔE', 'dE'],
         'Sphere': ['Sphere', 'Highlight', 'Selection']
     }
     
@@ -62,13 +63,14 @@ class ExternalDataImporter:
         'Znorm': '',
         'DataID': '',
         'Cluster': '',
+        '∆E': '',
+        'Marker': '.',
+        'Color': 'blue',
         'Centroid_X': '',
         'Centroid_Y': '',
         'Centroid_Z': '',
-        'Marker': '.',
-        'Color': 'blue',
-        'DeltaE': '',
-        'Sphere': ''
+        'Sphere': '',
+        'Radius': ''
     }
     
     def __init__(self):
@@ -225,7 +227,7 @@ class ExternalDataImporter:
             warnings.append(f"Only {len(mapped_coords)}/3 coordinate columns found")
         
         # Check data types for numeric columns
-        numeric_columns = ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', 'DeltaE']
+        numeric_columns = ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', '∆E', 'Radius']
         for col in numeric_columns:
             if col in column_mapping:
                 source_col = column_mapping[col]
@@ -267,7 +269,7 @@ class ExternalDataImporter:
                         value = str(value).strip()
                         
                         # Special handling for numeric columns
-                        if target_col in ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', 'DeltaE']:
+                        if target_col in ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', '∆E', 'Radius']:
                             try:
                                 # Convert to float to validate, then back to string for consistency
                                 float_val = float(value)

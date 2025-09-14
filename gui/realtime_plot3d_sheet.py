@@ -2223,9 +2223,9 @@ class RealtimePlot3DSheet:
             # Merge with existing data
             current_rows = self.sheet.get_total_rows()
             
-            # Get existing DataIDs to avoid duplicates
+            # Get existing DataIDs to avoid duplicates (start from row 7 where data begins)
             existing_dataids = set()
-            for row_idx in range(min(current_rows, 1000)):  # Reasonable limit for duplicate checking
+            for row_idx in range(7, min(current_rows, 1000)):  # Start from data area (row 7)
                 try:
                     dataid = self.sheet.get_cell_data(row_idx, 3)  # DataID column
                     if dataid and str(dataid).strip():
@@ -2247,8 +2247,15 @@ class RealtimePlot3DSheet:
             # Add new rows to the sheet
             if rows_to_add:
                 try:
-                    # Find the next available row
-                    start_row = current_rows
+                    # Find the next available row in data area (starting from row 7)
+                    start_row = max(current_rows, 7)  # Ensure we start at least at row 7 (data area)
+                    
+                    # If current_rows < 7, we need to ensure proper sheet structure
+                    if current_rows < 7:
+                        # Add rows to reach proper data start
+                        padding_rows = [[''] * len(self.PLOT3D_COLUMNS)] * (7 - current_rows)
+                        self.sheet.insert_rows(rows=padding_rows, idx=current_rows)
+                        start_row = 7
                     
                     # Add empty rows first
                     empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * len(rows_to_add)
@@ -2334,15 +2341,16 @@ class RealtimePlot3DSheet:
                 if current_rows > 0:
                     self.sheet.delete_rows(0, current_rows)
                 
-                # Insert new data
+                # Ensure proper structure: create 107 rows minimum for proper formatting
+                min_rows = 107
+                empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
+                self.sheet.insert_rows(rows=empty_rows, idx=0)
+                
+                # Insert imported data starting at row 7 (data area)
                 if result.data:
-                    # Add empty rows first
-                    empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * len(result.data)
-                    self.sheet.insert_rows(rows=empty_rows, idx=0)
-                    
-                    # Set the actual data
+                    # Set the actual data starting at row 7
                     for i, row in enumerate(result.data):
-                        self.sheet.set_row_data(i, values=row)
+                        self.sheet.set_row_data(7 + i, values=row)
                 
                 # Reapply formatting
                 self._apply_formatting()
