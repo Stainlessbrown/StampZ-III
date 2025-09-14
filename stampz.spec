@@ -48,6 +48,24 @@ try:
 except Exception:
     pass
 
+# Collect scipy data files and imports (sklearn dependency)
+try:
+    scipy_datas, scipy_binaries, scipy_hiddenimports = collect_all('scipy')
+    datas += scipy_datas
+    binaries += scipy_binaries
+    hiddenimports += scipy_hiddenimports
+except Exception:
+    pass
+
+# Collect threadpoolctl (sklearn dependency)
+try:
+    threadpoolctl_datas, threadpoolctl_binaries, threadpoolctl_hiddenimports = collect_all('threadpoolctl')
+    datas += threadpoolctl_datas
+    binaries += threadpoolctl_binaries
+    hiddenimports += threadpoolctl_hiddenimports
+except Exception:
+    pass
+
 # Collect ezodf data files and imports for ODS file handling
 try:
     ezodf_datas, ezodf_binaries, ezodf_hiddenimports = collect_all('ezodf')
@@ -109,12 +127,18 @@ hiddenimports += [
     'sklearn.cluster.KMeans',
     'sklearn.cluster._kmeans',
     'sklearn.decomposition',
-    'sklearn.decomposition.PCA',
-    'sklearn.decomposition._pca',
     'sklearn.base',
     'sklearn.utils',
+    'sklearn.utils._param_validation',
     'sklearn.utils.validation',
+    'sklearn.utils.fixes',
     'sklearn.exceptions',
+    'sklearn.metrics',
+    'sklearn.metrics.pairwise',
+    'scipy',
+    'scipy.sparse',
+    'scipy.linalg',
+    'threadpoolctl',
     'odf.opendocument',
     'odf.table',
     'odf.text',

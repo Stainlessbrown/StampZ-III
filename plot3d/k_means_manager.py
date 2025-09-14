@@ -2,13 +2,37 @@ import os
 import logging
 import numpy as np
 import pandas as pd
+
+# Robust sklearn import for PyInstaller compatibility
+HAS_SKLEARN = False
+KMeans = None
+
 try:
+    # Try the direct import first
     from sklearn.cluster import KMeans
     HAS_SKLEARN = True
-except ImportError:
-    print("Warning: scikit-learn not available. K-means clustering will be disabled.")
-    HAS_SKLEARN = False
-    KMeans = None
+    print("✓ sklearn.cluster.KMeans imported successfully")
+except ImportError as e1:
+    print(f"Direct sklearn import failed: {e1}")
+    try:
+        # Try importing sklearn first, then the specific module
+        import sklearn
+        from sklearn.cluster import KMeans
+        HAS_SKLEARN = True
+        print("✓ sklearn imported via two-step process")
+    except ImportError as e2:
+        print(f"Two-step sklearn import failed: {e2}")
+        try:
+            # Try importing with full path
+            import sklearn.cluster
+            KMeans = sklearn.cluster.KMeans
+            HAS_SKLEARN = True
+            print("✓ sklearn imported via full path")
+        except ImportError as e3:
+            print(f"Full path sklearn import failed: {e3}")
+            print("Warning: scikit-learn not available. K-means clustering will be disabled.")
+            HAS_SKLEARN = False
+            KMeans = None
 from typing import Optional, Tuple, Dict, Any, Union, List
 import ezodf
 import tkinter as tk
