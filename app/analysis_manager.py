@@ -1193,9 +1193,21 @@ class AnalysisManager:
         """Create clean template using formatted Plot3D_Template.ods."""
         try:
             import shutil
+            import sys
             
-            # Path to the formatted template
-            template_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates', 'plot3d', 'Plot3D_Template.ods')
+            # Path to the formatted template - handle both development and bundled environments
+            if getattr(sys, 'frozen', False):
+                # Running in a PyInstaller bundle
+                if hasattr(sys, '_MEIPASS'):
+                    # PyInstaller temp directory
+                    base_path = sys._MEIPASS
+                else:
+                    # App bundle Contents/Resources
+                    base_path = os.path.join(os.path.dirname(sys.executable), '..', 'Resources')
+                template_path = os.path.join(base_path, 'data', 'templates', 'plot3d', 'Plot3D_Template.ods')
+            else:
+                # Development environment
+                template_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates', 'plot3d', 'Plot3D_Template.ods')
             
             # Verify template exists
             if not os.path.exists(template_path):
