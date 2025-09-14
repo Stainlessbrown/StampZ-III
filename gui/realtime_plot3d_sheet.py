@@ -437,46 +437,37 @@ class RealtimePlot3DSheet:
             measurements = db.get_all_measurements()
             logger.info(f"Found {len(measurements) if measurements else 0} measurements for {self.sample_set_name}")
             
-            # CRITICAL FIX: Properly clear and reinitialize worksheet structure
+            # COMPLETE REFRESH: Clear and rebuild entire sheet from database
             try:
-                print(f"\n🧨 CLEARING WORKSHEET FOR REFRESH:")
+                print(f"\n🧨 COMPLETE REFRESH - CLEARING ENTIRE SHEET:")
                 current_rows = self.sheet.get_total_rows()
-                print(f"  Current sheet has {current_rows} rows")
+                print(f"  Current sheet has {current_rows} rows - will do complete rebuild")
                 
-                # IMPROVED: Only clear rows that will be overwritten with database data
-                print(f"  Using selective data clearing approach...")
+                # Clear ALL rows and start fresh
+                if current_rows > 0:
+                    self.sheet.delete_rows(0, current_rows)
+                    print(f"  ✅ Deleted all {current_rows} rows")
+                
+                # Clear any existing formatting
                 try:
-                    # MINIMAL clearing: Only clear rows that will definitely be overwritten
-                    # This maximally preserves user's intentional blank rows
-                    regular_measurements_count = len([m for m in measurements if m.get('image_name') != 'CENTROIDS']) if measurements else 0
-                    
-                    # Only clear the exact number of rows we'll populate (no buffer)
-                    rows_to_clear = min(regular_measurements_count, current_rows - 7)
-                    
-                    if current_rows > 7 and rows_to_clear > 0:
-                        for row_idx in range(7, 7 + rows_to_clear):
-                            empty_row = [''] * len(self.PLOT3D_COLUMNS)
-                            self.sheet.set_row_data(row_idx, values=empty_row)
-                        print(f"  ✅ Cleared {rows_to_clear} data rows (7-{6+rows_to_clear}) - preserving ALL empty rows beyond")
-                    else:
-                        print(f"  No rows to clear - preserving all user data")
-                except Exception as simple_clear_error:
-                    print(f"  ⚠️ Simple clear failed: {simple_clear_error}")
+                    self.sheet.dehighlight_all()
+                    print(f"  ✅ Cleared all highlighting")
+                except Exception:
+                    pass  # Not critical if this fails
+                
+                # Calculate how many rows we need for database data
+                regular_measurements_count = len([m for m in measurements if m.get('image_name') != 'CENTROIDS']) if measurements else 0
+                min_rows = max(50, regular_measurements_count + 20)  # Data + buffer, minimum 50
+                
+                # Create fresh sheet structure
+                empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
+                self.sheet.insert_rows(rows=empty_rows, idx=0)
+                print(f"  ✅ Created fresh sheet with {min_rows} rows ({regular_measurements_count} data + buffer)")
                 
             except Exception as clear_error:
-                logger.warning(f"Error clearing sheet: {clear_error}")
-                # Fallback: Try to clear data content without changing structure
-                try:
-                    print(f"  ⚠️ Fallback: Clearing data content only")
-                    # Clear only data rows (rows 7+), preserve headers and reserved rows
-                    current_rows = self.sheet.get_total_rows()
-                    if current_rows > 7:
-                        for row_idx in range(7, current_rows):
-                            empty_row = [''] * len(self.PLOT3D_COLUMNS)
-                            self.sheet.set_row_data(row_idx, values=empty_row)
-                        print(f"  ✅ Cleared data content in fallback mode")
-                except Exception as fallback_error:
-                    logger.error(f"Even fallback clearing failed: {fallback_error}")
+                logger.error(f"Error during complete refresh: {clear_error}")
+                print(f"  ❌ Complete refresh failed: {clear_error}")
+                return
             
             if not measurements:
                 logger.info("No measurements found - spreadsheet is empty")
@@ -635,18 +626,9 @@ class RealtimePlot3DSheet:
                     print(f"\n📝 INSERTING DATA:")
                     print(f"  Inserting {len(data_rows)} rows starting at sheet row 7 (display row 8)")
                     
-                    # Ensure sheet has minimum required rows (headers + reserved + data)
-                    min_required_rows = 7 + len(data_rows)  # 0-6 reserved, 7+ data
+                    # Sheet already has proper size from complete refresh above
                     current_rows = self.sheet.get_total_rows()
-                    
-                    print(f"  Sheet currently has {current_rows} rows, needs {min_required_rows}")
-                    
-                    if current_rows < min_required_rows:
-                        # Add empty rows to reach minimum
-                        rows_needed = min_required_rows - current_rows
-                        print(f"  Adding {rows_needed} empty rows to reach minimum")
-                        empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * rows_needed
-                        self.sheet.insert_rows(rows=empty_rows, idx=current_rows)
+                    print(f"  Sheet has {current_rows} rows ready for data insertion")
                     
                     # DEBUG: Check actual data insertion
                     print(f"  Inserting {len(data_rows)} rows starting at row 7 (display row 8)...")
