@@ -176,11 +176,11 @@ class RealtimePlot3DSheet:
     def _apply_formatting(self):
         """Apply visual formatting to cells."""
         try:
-            # Ensure sheet has enough rows for formatting
+            # Ensure sheet has enough rows for formatting (dynamic minimum)
             current_rows = self.sheet.get_total_rows()
-            min_rows = 107
+            min_rows = max(50, current_rows)  # Dynamic minimum - at least 50 rows for basic formatting
             if current_rows < min_rows:
-                # Add empty rows
+                # Add empty rows for formatting (but don't enforce artificial limit)
                 empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * (min_rows - current_rows)
                 self.sheet.insert_rows(rows=empty_rows, idx=current_rows)
             
@@ -201,39 +201,40 @@ class RealtimePlot3DSheet:
             # Column formatting as specified
             logger.info("Applying column formatting...")
             
-            # Column G (index 6): salmon color from row 8-107
+            # Column G (index 6): salmon color from row 8 to end of data
             try:
-                column_g_cells = [(row, 6) for row in range(7, min(107, self.sheet.get_total_rows()))]  # Rows 8-107 (0-indexed: 7-106)
+                total_rows = self.sheet.get_total_rows()
+                column_g_cells = [(row, 6) for row in range(7, total_rows)]  # Rows 8+ (0-indexed: 7+)
                 self.sheet.highlight_cells(
                     cells=column_g_cells,
                     bg='#FA8072',  # Salmon color
                     fg='black'
                 )
-                logger.info("Column G formatted with salmon color (rows 8-107)")
+                logger.info(f"Column G formatted with salmon color (rows 8-{total_rows})")
             except Exception as g_error:
                 logger.debug(f"Error formatting column G: {g_error}")
             
-            # Column H (index 7): yellow color from row 8-107
+            # Column H (index 7): yellow color from row 8 to end of data
             try:
-                column_h_cells = [(row, 7) for row in range(7, min(107, self.sheet.get_total_rows()))]  # Rows 8-107 (0-indexed: 7-106)
+                column_h_cells = [(row, 7) for row in range(7, total_rows)]  # Rows 8+ (0-indexed: 7+)
                 self.sheet.highlight_cells(
                     cells=column_h_cells,
                     bg='#FFFF99',  # Yellow color
                     fg='black'
                 )
-                logger.info("Column H formatted with yellow color (rows 8-107)")
+                logger.info(f"Column H formatted with yellow color (rows 8-{total_rows})")
             except Exception as h_error:
                 logger.debug(f"Error formatting column H: {h_error}")
             
-            # Column L (Sphere column, index 11): yellow color from row 2-107  
+            # Column L (Sphere column, index 11): yellow color from row 2 to end of data  
             try:
-                column_l_cells = [(row, 11) for row in range(1, min(107, self.sheet.get_total_rows()))]  # Rows 2-107 (0-indexed: 1-106)
+                column_l_cells = [(row, 11) for row in range(1, total_rows)]  # Rows 2+ (0-indexed: 1+)
                 self.sheet.highlight_cells(
                     cells=column_l_cells,
                     bg='#FFFF99',  # Yellow color
                     fg='black'
                 )
-                logger.info("Column L formatted with yellow color (rows 2-107)")
+                logger.info(f"Column L formatted with yellow color (rows 2-{total_rows})")
             except Exception as l_error:
                 logger.debug(f"Error formatting column L: {l_error}")
             
@@ -263,10 +264,10 @@ class RealtimePlot3DSheet:
             # For tksheet, we need to create dropdowns for ranges, not individual cells
             # Marker column validation (column 6, rows 8+ - skip rows 7 and earlier)
             try:
-                # FIXED: Use max to ensure we cover enough rows for data insertion
+                # Dynamic validation - cover all data rows plus buffer
                 current_sheet_rows = self.sheet.get_total_rows()
-                max_data_rows = max(50, current_sheet_rows)
-                print(f"DEBUG: Setting up marker dropdowns - sheet has {current_sheet_rows} rows, will create dropdowns for rows 8-{max_data_rows-1}")
+                max_data_rows = current_sheet_rows  # Use all available rows
+                print(f"DEBUG: Setting up marker dropdowns - sheet has {current_sheet_rows} rows, will create dropdowns for rows 8-{max_data_rows}")
                 
                 for row in range(7, max_data_rows):  # Start from row 7 = display row 8
                     # Get existing value to preserve it, or use default if empty
@@ -289,7 +290,7 @@ class RealtimePlot3DSheet:
             
             # Color column validation (column 7, rows 8+ - skip rows 7 and earlier)
             try:
-                max_data_rows = max(50, self.sheet.get_total_rows())
+                max_data_rows = self.sheet.get_total_rows()  # Dynamic - use all rows
                 for row in range(7, max_data_rows):
                     # Get existing value to preserve it, or use default if empty
                     try:
@@ -311,7 +312,7 @@ class RealtimePlot3DSheet:
             
             # Sphere column validation (column 11, rows 1+)
             try:
-                max_data_rows = max(50, self.sheet.get_total_rows())
+                max_data_rows = self.sheet.get_total_rows()  # Dynamic - use all rows
                 for row in range(1, max_data_rows):
                     # Get existing value to preserve it, or use default if empty
                     try:
@@ -2360,16 +2361,32 @@ class RealtimePlot3DSheet:
             if not result.success:
                 return
             
-            # Clear current sheet and populate with new data
+            # Clear current sheet completely and populate with new data
             try:
+                # COMPLETE RESET: Clear all data and formatting
                 current_rows = self.sheet.get_total_rows()
+                print(f"DEBUG: Import as New - clearing {current_rows} existing rows")
+                
+                # Clear ALL rows if any exist
                 if current_rows > 0:
                     self.sheet.delete_rows(0, current_rows)
+                    print(f"DEBUG: Deleted all {current_rows} rows")
                 
-                # Ensure proper structure: create 107 rows minimum for proper formatting
-                min_rows = 107
+                # Clear any existing formatting/highlighting
+                try:
+                    self.sheet.dehighlight_all()
+                    print("DEBUG: Cleared all highlighting")
+                except Exception as highlight_error:
+                    print(f"DEBUG: Highlight clearing failed (not critical): {highlight_error}")
+                
+                # Create fresh sheet structure with enough rows for imported data + buffer
+                imported_data_rows = len(result.data) if result.data else 0
+                imported_centroid_rows = len(result.centroid_data) if result.centroid_data else 0
+                min_rows = max(50, imported_data_rows + 20)  # Data + 20 row buffer, minimum 50
+                
                 empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
                 self.sheet.insert_rows(rows=empty_rows, idx=0)
+                print(f"DEBUG: Created fresh sheet with {min_rows} rows ({imported_data_rows} data + buffer)")
                 
                 # Insert centroid data first (rows 1-6)
                 if result.centroid_data:
@@ -2389,15 +2406,14 @@ class RealtimePlot3DSheet:
                 self._apply_formatting()
                 self._setup_validation()
                 
-                # Success message
+                # Success message with clear database saving instructions
                 centroid_msg = f"\n• Imported {len(result.centroid_data)} K-means centroids" if result.centroid_data else ""
+                save_reminder = "\n\n⚠️ IMPORTANT: To preserve this data permanently:\n• Click 'Save Changes to DB' to update your StampZ database\n• Otherwise, reopening will reload from database (losing imports)"
                 messagebox.showinfo(
                     "Import Successful",
                     f"✅ Successfully created new worksheet from external data!\n\n"
                     f"• Imported {result.rows_imported} data rows{centroid_msg}\n"
-                    f"• Total warnings: {len(result.warnings)}\n\n"
-                    f"This is a fresh worksheet - your StampZ database was not modified.\n"
-                    f"Use 'Save Changes to DB' to update your database if desired."
+                    f"• Total warnings: {len(result.warnings)}{save_reminder}"
                 )
                 
                 logger.info(f"Created new worksheet with {result.rows_imported} rows from {file_path}")
