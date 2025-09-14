@@ -77,6 +77,8 @@ except Exception:
 
 # Add additional hidden imports
 hiddenimports += [
+    'initialize_env',  # Critical: Entry point environment setup
+    'launch_selector',  # Main application launch selector
     'PIL.Image',
     'PIL.ImageTk',
     'PIL._tkinter_finder',
