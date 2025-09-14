@@ -171,8 +171,8 @@ class AnalysisManager:
                 # Create worksheet manager and template (ODS format only)
                 manager = WorksheetManager()
                 
-                # Create ODS template
-                success = manager._create_simple_plot3d_template(filepath, sample_set_name)
+                # Create ODS template using the formatted template file
+                success = self._create_clean_template(filepath, sample_set_name)
                 
                 if success:
                     # Ask if user wants to populate with existing data
@@ -324,10 +324,10 @@ class AnalysisManager:
         try:
             from utils.worksheet_manager import WorksheetManager
             
-            # Use WorksheetManager's new rigid ODS population method
-            manager = WorksheetManager()
-            success = manager._create_simple_plot3d_template(file_path, sample_set_name)
+            # Create formatted ODS template and populate with data
+            success = self._create_clean_template(file_path, sample_set_name)
             
+            # Check if template was created successfully
             if success:
                 # Now populate it with actual data using the rigid format
                 self._populate_rigid_ods_with_data(file_path, sample_set_name)
@@ -1068,9 +1068,8 @@ class AnalysisManager:
         try:
             from utils.worksheet_manager import WorksheetManager
             
-            # Create worksheet manager and ODS template
-            manager = WorksheetManager()
-            success = manager._create_simple_plot3d_template(filepath, sample_set_name)
+            # Create formatted ODS template
+            success = self._create_clean_template(filepath, sample_set_name)
             
             if success and populate:
                 # Populate ODS template with data
@@ -1202,8 +1201,7 @@ class AnalysisManager:
             if not os.path.exists(template_path):
                 logger.warning(f"Formatted template not found at {template_path}, creating basic template")
                 # Fallback to basic creation if template missing
-                self._create_basic_template(filepath, sample_set_name)
-                return
+                return self._create_basic_template(filepath, sample_set_name)
             
             # Copy the formatted template to the new location
             shutil.copy2(template_path, filepath)
@@ -1212,12 +1210,13 @@ class AnalysisManager:
             self._update_template_sample_name(filepath, sample_set_name)
             
             logger.info(f"Created formatted ODS template from {template_path}: {filepath}")
+            return True
             
         except Exception as e:
             logger.error(f"Error creating template from formatted file: {e}")
             logger.info("Falling back to basic template creation")
             # Fallback to basic creation if template copy fails
-            self._create_basic_template(filepath, sample_set_name)
+            return self._create_basic_template(filepath, sample_set_name)
     
     def _create_basic_template(self, filepath, sample_set_name):
         """Create basic template using pandas (fallback method)."""
@@ -1232,10 +1231,12 @@ class AnalysisManager:
             df.to_excel(filepath, engine='odf', index=False)
             
             logger.info(f"Created basic ODS template: {filepath}")
+            return True
             
         except Exception as e:
             logger.error(f"Error creating basic template: {e}")
             messagebox.showerror("Error", f"Failed to create template: {e}")
+            return False
     
     def _update_template_sample_name(self, filepath, sample_set_name):
         """Update sample set name in the copied template."""
