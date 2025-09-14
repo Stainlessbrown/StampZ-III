@@ -144,6 +144,13 @@ class ExternalDataImporter:
         if len(df.columns) == 0:
             raise Exception("File contains no columns")
         
+        # Skip the reserved K-means centroid rows (rows 2-7 in spreadsheet, which are rows 1-6 in DataFrame)
+        # Row 1 is headers, rows 2-7 are reserved for K-means centroids, data starts row 8
+        if len(df) > 6:  # Only skip if we have enough rows
+            # Keep only data rows (skip first 6 rows after header which are centroid area)
+            df = df.iloc[6:].reset_index(drop=True)  # Skip rows 1-6 (0-indexed), keep 7+ as data
+            warnings.append("Skipped 6 reserved K-means centroid rows (rows 2-7), imported data starting from row 8")
+        
         logger.info(f"Read {len(df)} rows and {len(df.columns)} columns from {file_path}")
         return df, warnings
     
