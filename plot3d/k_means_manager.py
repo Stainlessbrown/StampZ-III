@@ -41,6 +41,30 @@ import time
 import fcntl
 import errno
 
+class CustomIndexRange:
+    """Custom range-like object that supports non-contiguous indices for realtime K-means."""
+    
+    def __init__(self, indices: List[int]):
+        self.indices = sorted(indices)  # Ensure indices are sorted
+    
+    def __iter__(self):
+        return iter(self.indices)
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, key):
+        return self.indices[key]
+    
+    def __contains__(self, item):
+        return item in self.indices
+    
+    def __repr__(self):
+        return f"CustomIndexRange({self.indices})"
+    
+    def __bool__(self):
+        return bool(self.indices)
+
 class KmeansManager:
     """
     Manager class for applying K-means clustering on normalized coordinate data.
@@ -403,9 +427,23 @@ class KmeansManager:
                     raise ValueError(f"Missing centroid for cluster {cluster_idx}")
             
             # Update the "Cluster" column using the cleaned indices and assignments
+            print(f"\n🎯 CLUSTER ASSIGNMENT DEBUG:")
+            print(f"  Assigning clusters to {len(clean_indices)} DataFrame indices")
+            
             for i, idx in enumerate(clean_indices):
                 df_copy.at[idx, 'Cluster'] = formatted_clusters[i]
                 
+                # Debug: Show what display row this corresponds to
+                if '_original_sheet_row' in df_copy.columns:
+                    sheet_row = int(df_copy.loc[idx, '_original_sheet_row'])
+                    display_row = sheet_row + 1
+                    data_id = df_copy.loc[idx, 'DataID'] if 'DataID' in df_copy.columns else f'Row_{idx}'
+                    print(f"    DataFrame idx {idx} (display row {display_row}) → cluster {formatted_clusters[i]} | DataID: {data_id}")
+                    
+                    # CRITICAL: Flag if we're assigning to first 7 display rows
+                    if display_row <= 7:
+                        print(f"      ⚠️ WARNING: Assigning cluster to display row {display_row} (should be protected!)")
+                        
             self.logger.info(f"Successfully assigned clusters to {len(clean_indices)} rows")
             
             # Verify all rows received a cluster assignment
@@ -728,6 +766,12 @@ class KmeansManager:
         
         print(f"  Converted to sheet rows: {start_sheet_row}-{end_sheet_row}")
         
+        # Show what _original_sheet_row values are in the DataFrame
+        print(f"  📊 _original_sheet_row values in DataFrame:")
+        print(f"     Min: {self.data['_original_sheet_row'].min()}")
+        print(f"     Max: {self.data['_original_sheet_row'].max()}")
+        print(f"     Unique values: {sorted(self.data['_original_sheet_row'].unique())[:20]}")
+        
         # Find DataFrame indices where _original_sheet_row falls in the range
         original_rows = self.data['_original_sheet_row'].astype(int)
         mask = (original_rows >= start_sheet_row) & (original_rows <= end_sheet_row)
@@ -735,12 +779,24 @@ class KmeansManager:
         
         print(f"  Found {len(selected_indices)} DataFrame indices: {selected_indices}")
         
-        # Show the mapping for debugging
-        for idx in selected_indices[:5]:  # Show first 5
+        # Show the mapping for debugging - show ALL selected indices, not just first 5
+        print(f"  🔍 COMPLETE MAPPING FOR SELECTED INDICES:")
+        for idx in selected_indices:
             sheet_row = int(self.data.loc[idx, '_original_sheet_row'])
             display_row = sheet_row + 1
             data_id = self.data.loc[idx, 'DataID'] if 'DataID' in self.data.columns else f'Row_{idx}'
             print(f"    DataFrame idx {idx} → sheet row {sheet_row} (display {display_row}) DataID: {data_id}")
+        
+        # CRITICAL: Check if any of the first 7 display rows are being included
+        problematic_indices = [idx for idx in selected_indices 
+                              if int(self.data.loc[idx, '_original_sheet_row']) < 7]  # sheet rows 0-6 = display rows 1-7
+        if problematic_indices:
+            print(f"  ⚠️ CRITICAL ERROR: First 7 display rows incorrectly included!")
+            for idx in problematic_indices:
+                sheet_row = int(self.data.loc[idx, '_original_sheet_row'])
+                display_row = sheet_row + 1
+                data_id = self.data.loc[idx, 'DataID'] if 'DataID' in self.data.columns else f'Row_{idx}'
+                print(f"    ❌ DataFrame idx {idx} → display row {display_row} (should NOT be selected!)")
         
         if not selected_indices:
             print(f"  ⚠️ No DataFrame rows found for display range {start}-{end}")
@@ -774,9 +830,13 @@ class KmeansManager:
                     else:
                         print(f"    DataFrame idx {missing_idx}: (beyond DataFrame bounds)")
             
-            # For non-contiguous ranges, return the full range but log the issue
-            print(f"  🔧 Returning full range {min_idx}-{max_idx} (K-means will filter out invalid rows)")
-            return range(min_idx, max_idx + 1)
+            # For non-contiguous ranges, we need to return only the valid indices
+            # This prevents K-means from trying to assign clusters to gap positions
+            print(f"  🔧 Returning only valid indices: {selected_indices}")
+            print(f"     (skipping gap positions to prevent cluster assignment errors)")
+            
+            # Create a custom range-like object that only includes valid indices
+            return CustomIndexRange(selected_indices)
     
     def _apply_kmeans_gui(self):
         """Handle Apply button click for K-means clustering"""
