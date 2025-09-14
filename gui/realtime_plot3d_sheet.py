@@ -369,8 +369,17 @@ class RealtimePlot3DSheet:
         self.export_plot3d_btn = ttk.Button(toolbar, text="Export for Standalone Plot_3D", command=self._export_for_plot3d)
         self.export_plot3d_btn.pack(side=tk.LEFT, padx=5)
         
-        self.import_plot3d_btn = ttk.Button(toolbar, text="Import from Plot_3D", command=self._import_from_plot3d)
-        self.import_plot3d_btn.pack(side=tk.LEFT, padx=5)
+        # Create import menu button
+        self.import_menu_btn = ttk.Menubutton(toolbar, text="Import Data")
+        self.import_menu_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Create import menu
+        import_menu = tk.Menu(self.import_menu_btn, tearoff=0)
+        import_menu.add_command(label="Import & Merge", command=self._import_and_merge)
+        import_menu.add_command(label="Import as New", command=self._import_as_new)
+        import_menu.add_separator()
+        import_menu.add_command(label="Import from Plot_3D (Legacy)", command=self._import_from_plot3d)
+        self.import_menu_btn.configure(menu=import_menu)
         
         self.auto_refresh_btn = ttk.Button(toolbar, text="Auto-Refresh: ON", command=self._toggle_auto_refresh)
         self.auto_refresh_btn.pack(side=tk.LEFT, padx=20)
@@ -2180,6 +2189,225 @@ class RealtimePlot3DSheet:
         except Exception as e:
             logger.error(f"Error in template export: {e}")
             return False
+    
+    def _import_and_merge(self):
+        """Import external data and merge with existing realtime datasheet data.
+        
+        This adds new data to the existing sheet without overwriting existing entries.
+        """
+        print("DEBUG: Import & Merge button clicked")
+        try:
+            from utils.external_data_importer import ExternalDataImporter
+            
+            # Ask for file to import
+            file_path = filedialog.askopenfilename(
+                title="Import External Data to Merge",
+                filetypes=[
+                    ('CSV Files', '*.csv'),
+                    ('OpenDocument Spreadsheet', '*.ods'),
+                    ('Excel Workbook', '*.xlsx'),
+                    ('All files', '*.*')
+                ]
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Import the external data
+            importer = ExternalDataImporter()
+            result = self._import_external_data(importer, file_path)
+            
+            if not result.success:
+                return
+            
+            # Merge with existing data
+            current_rows = self.sheet.get_total_rows()
+            
+            # Get existing DataIDs to avoid duplicates
+            existing_dataids = set()
+            for row_idx in range(min(current_rows, 1000)):  # Reasonable limit for duplicate checking
+                try:
+                    dataid = self.sheet.get_cell_data(row_idx, 3)  # DataID column
+                    if dataid and str(dataid).strip():
+                        existing_dataids.add(str(dataid).strip())
+                except:
+                    continue
+            
+            # Filter out rows with duplicate DataIDs
+            rows_to_add = []
+            duplicates_skipped = 0
+            
+            for row in result.data:
+                dataid = str(row[3]).strip() if len(row) > 3 else ''  # DataID column
+                if dataid and dataid in existing_dataids:
+                    duplicates_skipped += 1
+                    continue
+                rows_to_add.append(row)
+            
+            # Add new rows to the sheet
+            if rows_to_add:
+                try:
+                    # Find the next available row
+                    start_row = current_rows
+                    
+                    # Add empty rows first
+                    empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * len(rows_to_add)
+                    self.sheet.insert_rows(rows=empty_rows, idx=start_row)
+                    
+                    # Set the actual data
+                    for i, row in enumerate(rows_to_add):
+                        self.sheet.set_row_data(start_row + i, values=row)
+                    
+                    # Reapply formatting
+                    self._apply_formatting()
+                    self._setup_validation()
+                    
+                    # Success message
+                    messagebox.showinfo(
+                        "Merge Successful",
+                        f"✅ Successfully merged external data!\n\n"
+                        f"• Added {len(rows_to_add)} new rows\n"
+                        f"• Skipped {duplicates_skipped} duplicate entries\n"
+                        f"• Total warnings: {len(result.warnings)}\n\n"
+                        f"Your existing data has been preserved."
+                    )
+                    
+                    logger.info(f"Merged {len(rows_to_add)} new rows from {file_path}")
+                    
+                except Exception as merge_error:
+                    logger.error(f"Error merging data: {merge_error}")
+                    messagebox.showerror("Merge Error", f"Failed to merge data: {merge_error}")
+            else:
+                messagebox.showinfo(
+                    "No New Data",
+                    f"No new data to merge - all {result.rows_imported} rows already exist in the sheet."
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in import and merge: {e}")
+            messagebox.showerror("Import Error", f"Failed to import and merge data: {e}")
+    
+    def _import_as_new(self):
+        """Import external data as a new realtime datasheet (doesn't affect database).
+        
+        This creates a fresh worksheet from external data without touching the database.
+        """
+        print("DEBUG: Import as New button clicked")
+        try:
+            from utils.external_data_importer import ExternalDataImporter
+            
+            # Warn about data replacement
+            if not messagebox.askyesno(
+                "Import as New Confirmation",
+                "⚠️ CREATE NEW WORKSHEET:\n\n"
+                "This will replace your current spreadsheet with data from an external file.\n\n"
+                "Your StampZ database will NOT be affected.\n"
+                "Your current worksheet data will be lost.\n\n"
+                "Are you sure you want to proceed?"
+            ):
+                return
+            
+            # Ask for file to import
+            file_path = filedialog.askopenfilename(
+                title="Import External Data as New Worksheet",
+                filetypes=[
+                    ('CSV Files', '*.csv'),
+                    ('OpenDocument Spreadsheet', '*.ods'),
+                    ('Excel Workbook', '*.xlsx'),
+                    ('All files', '*.*')
+                ]
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Import the external data
+            importer = ExternalDataImporter()
+            result = self._import_external_data(importer, file_path)
+            
+            if not result.success:
+                return
+            
+            # Clear current sheet and populate with new data
+            try:
+                current_rows = self.sheet.get_total_rows()
+                if current_rows > 0:
+                    self.sheet.delete_rows(0, current_rows)
+                
+                # Insert new data
+                if result.data:
+                    # Add empty rows first
+                    empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * len(result.data)
+                    self.sheet.insert_rows(rows=empty_rows, idx=0)
+                    
+                    # Set the actual data
+                    for i, row in enumerate(result.data):
+                        self.sheet.set_row_data(i, values=row)
+                
+                # Reapply formatting
+                self._apply_formatting()
+                self._setup_validation()
+                
+                # Success message
+                messagebox.showinfo(
+                    "Import Successful",
+                    f"✅ Successfully created new worksheet from external data!\n\n"
+                    f"• Imported {result.rows_imported} rows\n"
+                    f"• Total warnings: {len(result.warnings)}\n\n"
+                    f"This is a fresh worksheet - your StampZ database was not modified.\n"
+                    f"Use 'Save Changes to DB' to update your database if desired."
+                )
+                
+                logger.info(f"Created new worksheet with {result.rows_imported} rows from {file_path}")
+                
+            except Exception as new_error:
+                logger.error(f"Error creating new worksheet: {new_error}")
+                messagebox.showerror("Import Error", f"Failed to create new worksheet: {new_error}")
+                
+        except Exception as e:
+            logger.error(f"Error in import as new: {e}")
+            messagebox.showerror("Import Error", f"Failed to import as new: {e}")
+    
+    def _import_external_data(self, importer, file_path):
+        """Helper method to import external data using the importer.
+        
+        Args:
+            importer: ExternalDataImporter instance
+            file_path: Path to the file to import
+            
+        Returns:
+            ImportResult object
+        """
+        try:
+            # Import the file
+            result = importer.import_file(file_path)
+            
+            # Show warnings/errors if any
+            if result.warnings or result.errors:
+                warning_text = ""
+                if result.warnings:
+                    warning_text += "Warnings:\n" + "\n".join([f"• {w}" for w in result.warnings[:10]])  # Limit to first 10
+                    if len(result.warnings) > 10:
+                        warning_text += f"\n... and {len(result.warnings) - 10} more warnings"
+                
+                if result.errors:
+                    if warning_text:
+                        warning_text += "\n\n"
+                    warning_text += "Errors:\n" + "\n".join([f"• {e}" for e in result.errors[:5]])  # Limit to first 5
+                
+                if result.errors:
+                    messagebox.showerror("Import Errors", warning_text)
+                    return result
+                elif result.warnings:
+                    messagebox.showwarning("Import Warnings", warning_text)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error importing external data: {e}")
+            messagebox.showerror("Import Error", f"Failed to import external data: {e}")
+            from utils.external_data_importer import ImportResult
+            return ImportResult(success=False, errors=[str(e)])
     
     def _import_from_plot3d(self):
         """Import changes back from a Plot_3D external file.
