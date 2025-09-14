@@ -18,6 +18,7 @@ class ImportResult:
     """Result of an import operation."""
     success: bool
     data: Optional[List[List[str]]] = None
+    centroid_data: Optional[List[Tuple[int, List[str]]]] = None  # (cluster_id, row_data) pairs
     rows_imported: int = 0
     rows_skipped: int = 0
     warnings: List[str] = None
@@ -76,6 +77,7 @@ class ExternalDataImporter:
     def __init__(self):
         """Initialize the importer."""
         self.last_column_mapping = {}
+        self.last_centroid_data = []
     
     def detect_file_format(self, file_path: str) -> str:
         """Detect the file format based on extension.
@@ -144,12 +146,41 @@ class ExternalDataImporter:
         if len(df.columns) == 0:
             raise Exception("File contains no columns")
         
-        # Skip the reserved K-means centroid rows (rows 2-7 in spreadsheet, which are rows 1-6 in DataFrame)
-        # Row 1 is headers, rows 2-7 are reserved for K-means centroids, data starts row 8
-        if len(df) > 6:  # Only skip if we have enough rows
-            # Keep only data rows (skip first 6 rows after header which are centroid area)
-            df = df.iloc[6:].reset_index(drop=True)  # Skip rows 1-6 (0-indexed), keep 7+ as data
-            warnings.append("Skipped 6 reserved K-means centroid rows (rows 2-7), imported data starting from row 8")
+        # Handle K-means centroid rows (rows 2-7 in spreadsheet, which are rows 1-6 in DataFrame)
+        # These are reserved but if they contain data, they should be preserved as centroid data
+        centroid_rows = []
+        data_rows = []
+        
+        if len(df) > 6:  # Only process if we have enough rows
+            # Check rows 0-5 (DataFrame index, which are rows 2-7 in spreadsheet) for valid centroid data
+            original_df = df.copy()  # Keep original for centroid processing
+            for i in range(6):
+                if i < len(df):
+                    row = df.iloc[i]
+                    # Check if this row has meaningful centroid data
+                    has_centroid_data = self._is_valid_centroid_row(row)
+                    if has_centroid_data:
+                        # Store as dictionary for easier processing later
+                        row_dict = row.to_dict()
+                        centroid_rows.append((i, row_dict))
+                        warnings.append(f"Found valid K-means centroid data in row {i+2}")
+            
+            # Data rows start from row 7 (DataFrame index 6)
+            data_rows_df = df.iloc[6:].reset_index(drop=True)
+            if not data_rows_df.empty:
+                warnings.append(f"Imported {len(data_rows_df)} data rows starting from row 8")
+            else:
+                warnings.append("No data rows found after centroid area")
+        else:
+            # If we have 6 or fewer rows, treat them all as data
+            data_rows_df = df
+            warnings.append("File has 6 or fewer rows, treating all as data rows")
+        
+        # Store centroid info for later use
+        self.last_centroid_data = centroid_rows
+        
+        # Return only the data rows for normal processing
+        df = data_rows_df if 'data_rows_df' in locals() else df
         
         logger.info(f"Read {len(df)} rows and {len(df.columns)} columns from {file_path}")
         return df, warnings
@@ -325,12 +356,61 @@ class ExternalDataImporter:
             rows, conversion_warnings = self.convert_to_realtime_format(df, column_mapping)
             result.warnings.extend(conversion_warnings)
             
+            # Process any centroid data found (stored during file reading)
+            centroid_results = []
+            for cluster_idx, centroid_row in self.last_centroid_data:
+                # Convert centroid row to realtime format using column mapping
+                centroid_data = []
+                for target_col in self.REALTIME_COLUMNS:
+                    if target_col in column_mapping:
+                        source_col = column_mapping[target_col]
+                        value = centroid_row[source_col] if source_col in centroid_row else self.DEFAULTS[target_col]
+                        if pd.isna(value) or value is None:
+                            value = self.DEFAULTS[target_col]
+                        else:
+                            value = str(value).strip()
+                            # Handle numeric columns
+                            if target_col in ['Xnorm', 'Ynorm', 'Znorm', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', '∆E', 'Radius']:
+                                try:
+                                    if value and value != '':
+                                        float_val = float(value)
+                                        value = str(round(float_val, 4))
+                                    else:
+                                        value = self.DEFAULTS[target_col]
+                                except (ValueError, TypeError):
+                                    value = self.DEFAULTS[target_col]
+                    else:
+                        value = self.DEFAULTS[target_col]
+                    centroid_data.append(value)
+                
+                # Extract cluster ID from the original data (not row index)
+                cluster_id = cluster_idx  # Default fallback to row index
+                
+                # Try to get actual cluster ID from the data
+                # Check Cluster column first
+                if 'Cluster' in centroid_row and pd.notna(centroid_row['Cluster']):
+                    try:
+                        cluster_id = int(float(centroid_row['Cluster']))
+                    except (ValueError, TypeError):
+                        pass
+                # Check DataID column as backup (in case data is shifted)
+                elif 'DataID' in centroid_row and pd.notna(centroid_row['DataID']):
+                    try:
+                        test_val = float(centroid_row['DataID'])
+                        if 0 <= test_val <= 5:
+                            cluster_id = int(test_val)
+                    except (ValueError, TypeError):
+                        pass
+                
+                centroid_results.append((cluster_id, centroid_data))
+            
             # Set results
             result.data = rows
+            result.centroid_data = centroid_results
             result.rows_imported = len(rows)
             result.success = True
             
-            logger.info(f"Successfully imported {result.rows_imported} rows from {file_path}")
+            logger.info(f"Successfully imported {result.rows_imported} data rows and {len(centroid_results)} centroid rows from {file_path}")
             
         except Exception as e:
             error_msg = f"Import failed: {e}"
@@ -363,3 +443,57 @@ class ExternalDataImporter:
             suggestions[target_col] = list(set(possible_matches))  # Remove duplicates
         
         return suggestions
+    
+    def _is_valid_centroid_row(self, row) -> bool:
+        """Check if a row contains valid K-means centroid data.
+        
+        Args:
+            row: pandas Series representing a row
+            
+        Returns:
+            bool: True if row contains valid centroid data
+        """
+        try:
+            # Look for cluster ID in both Cluster column and DataID column (CSV structure can be messy)
+            cluster_id = None
+            
+            # Check standard Cluster column (index 4)
+            if len(row) > 4 and pd.notna(row.iloc[4]):
+                try:
+                    test_id = int(float(row.iloc[4]))
+                    if 0 <= test_id <= 5:
+                        cluster_id = test_id
+                except (ValueError, TypeError):
+                    pass
+            
+            # Also check DataID column (index 3) in case data shifted
+            if cluster_id is None and len(row) > 3 and pd.notna(row.iloc[3]):
+                try:
+                    test_id = int(float(row.iloc[3]))
+                    if 0 <= test_id <= 5:
+                        cluster_id = test_id
+                except (ValueError, TypeError):
+                    pass
+            
+            if cluster_id is None:
+                return False
+            
+            # Check if there's centroid coordinate data (Centroid_X, Y, Z columns)
+            centroid_indices = [8, 9, 10]  # Centroid_X, Y, Z
+            has_coords = False
+            
+            for coord_idx in centroid_indices:
+                if len(row) > coord_idx and pd.notna(row.iloc[coord_idx]):
+                    coord_val = str(row.iloc[coord_idx]).strip()
+                    if coord_val and coord_val != '' and coord_val.lower() not in ['nan', 'none']:
+                        try:
+                            float(coord_val)  # Valid numeric coordinate
+                            has_coords = True
+                            break
+                        except (ValueError, TypeError):
+                            continue
+            
+            return has_coords
+            
+        except Exception:
+            return False

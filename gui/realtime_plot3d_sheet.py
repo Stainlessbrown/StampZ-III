@@ -2279,15 +2279,26 @@ class RealtimePlot3DSheet:
                     for i, row in enumerate(rows_to_add):
                         self.sheet.set_row_data(start_row + i, values=row)
                     
+                    # Also handle any centroid data from the import
+                    centroids_added = 0
+                    if result.centroid_data:
+                        for cluster_id, centroid_row in result.centroid_data:
+                            if 0 <= cluster_id <= 5:  # Valid centroid area
+                                centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
+                                self.sheet.set_row_data(centroid_row_idx, values=centroid_row)
+                                centroids_added += 1
+                                logger.info(f"Merged centroid for cluster {cluster_id} to row {centroid_row_idx + 1}")
+                    
                     # Reapply formatting
                     self._apply_formatting()
                     self._setup_validation()
                     
                     # Success message
+                    centroid_msg = f"\n• Added {centroids_added} K-means centroids" if centroids_added > 0 else ""
                     messagebox.showinfo(
                         "Merge Successful",
                         f"✅ Successfully merged external data!\n\n"
-                        f"• Added {len(rows_to_add)} new rows\n"
+                        f"• Added {len(rows_to_add)} new data rows{centroid_msg}\n"
                         f"• Skipped {duplicates_skipped} duplicate entries\n"
                         f"• Total warnings: {len(result.warnings)}\n\n"
                         f"Your existing data has been preserved."
@@ -2360,6 +2371,14 @@ class RealtimePlot3DSheet:
                 empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
                 self.sheet.insert_rows(rows=empty_rows, idx=0)
                 
+                # Insert centroid data first (rows 1-6)
+                if result.centroid_data:
+                    for cluster_id, centroid_row in result.centroid_data:
+                        if 0 <= cluster_id <= 5:  # Valid centroid area
+                            centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
+                            self.sheet.set_row_data(centroid_row_idx, values=centroid_row)
+                            logger.info(f"Imported centroid for cluster {cluster_id} to row {centroid_row_idx + 1}")
+                
                 # Insert imported data starting at row 7 (data area)
                 if result.data:
                     # Set the actual data starting at row 7
@@ -2371,10 +2390,11 @@ class RealtimePlot3DSheet:
                 self._setup_validation()
                 
                 # Success message
+                centroid_msg = f"\n• Imported {len(result.centroid_data)} K-means centroids" if result.centroid_data else ""
                 messagebox.showinfo(
                     "Import Successful",
                     f"✅ Successfully created new worksheet from external data!\n\n"
-                    f"• Imported {result.rows_imported} rows\n"
+                    f"• Imported {result.rows_imported} data rows{centroid_msg}\n"
                     f"• Total warnings: {len(result.warnings)}\n\n"
                     f"This is a fresh worksheet - your StampZ database was not modified.\n"
                     f"Use 'Save Changes to DB' to update your database if desired."
