@@ -374,12 +374,26 @@ class AnalysisManager:
                 'Centroid_Z', 'Sphere', 'Radius'
             ]
             
-            for i, measurement in enumerate(measurements):
+                for i, measurement in enumerate(measurements):
                 tr = TableRow()
+                
+                # CRITICAL FIX: Normalize raw L*a*b* values from database for Plot_3D
+                l_val = measurement.get('l_value', 0.0)
+                a_val = measurement.get('a_value', 0.0) 
+                b_val = measurement.get('b_value', 0.0)
+                
+                # Apply proper normalization:
+                # L*: 0-100 → 0-1
+                # a*: -128 to +127 → 0-1
+                # b*: -128 to +127 → 0-1
+                x_norm = max(0.0, min(1.0, (l_val if l_val is not None else 0.0) / 100.0))
+                y_norm = max(0.0, min(1.0, ((a_val if a_val is not None else 0.0) + 128.0) / 255.0))
+                z_norm = max(0.0, min(1.0, ((b_val if b_val is not None else 0.0) + 128.0) / 255.0))
+                
                 row_data = {
-                    'Xnorm': measurement.get('l_value', 0.0),
-                    'Ynorm': measurement.get('a_value', 0.0),
-                    'Znorm': measurement.get('b_value', 0.0),
+                    'Xnorm': round(x_norm, 4),  # Normalized L* value
+                    'Ynorm': round(y_norm, 4),  # Normalized a* value
+                    'Znorm': round(z_norm, 4),  # Normalized b* value
                     'DataID': f"{sample_set_name}_Sample_{i+1:03d}",
                     'Cluster': '',
                     '∆E': '',
@@ -1252,13 +1266,26 @@ class AnalysisManager:
                 )
                 return
             
-            # Create DataFrame with real data
+            # Create DataFrame with real data - NORMALIZE the raw L*a*b* values from database
             data_rows = []
             for i, measurement in enumerate(measurements):
+                # CRITICAL FIX: Normalize raw L*a*b* values from database for Plot_3D
+                l_val = measurement.get('l_value', 0.0)
+                a_val = measurement.get('a_value', 0.0)
+                b_val = measurement.get('b_value', 0.0)
+                
+                # Apply proper normalization:
+                # L*: 0-100 → 0-1
+                # a*: -128 to +127 → 0-1 
+                # b*: -128 to +127 → 0-1
+                x_norm = max(0.0, min(1.0, (l_val if l_val is not None else 0.0) / 100.0))
+                y_norm = max(0.0, min(1.0, ((a_val if a_val is not None else 0.0) + 128.0) / 255.0))
+                z_norm = max(0.0, min(1.0, ((b_val if b_val is not None else 0.0) + 128.0) / 255.0))
+                
                 row = {
-                    'Xnorm': measurement.get('l_value', 0.0),
-                    'Ynorm': measurement.get('a_value', 0.0),
-                    'Znorm': measurement.get('b_value', 0.0),
+                    'Xnorm': round(x_norm, 4),  # Normalized L* value
+                    'Ynorm': round(y_norm, 4),  # Normalized a* value 
+                    'Znorm': round(z_norm, 4),  # Normalized b* value
                     'DataID': f"{sample_set_name}_Sample_{i+1:03d}",
                     'Cluster': '', '∆E': '', 'Marker': '.', 'Color': 'blue',
                     'Centroid_X': '', 'Centroid_Y': '', 'Centroid_Z': '',

@@ -584,18 +584,26 @@ class RealtimePlot3DSheet:
                     # Debug the measurement structure
                     logger.debug(f"Processing measurement {i}: keys={list(measurement.keys())}")
                     
-                    # Get Lab values and apply normalization if needed
+                    # Get Lab values - these are raw L*a*b* values from database that need normalization
                     l_val = measurement.get('l_value', 0.0)
                     a_val = measurement.get('a_value', 0.0)
                     b_val = measurement.get('b_value', 0.0)
                     sample_type = measurement.get('sample_type', '')
                     
-                    # PLOT_3D RULE: Data should already be normalized (0-1 range)
-                    # Plot_3D only works with normalized data, so we should NOT normalize here
-                    # Use values as-is but constrain to 0-1 range for safety
-                    x_norm = max(0.0, min(1.0, l_val if l_val is not None else 0.0))
-                    y_norm = max(0.0, min(1.0, a_val if a_val is not None else 0.0))
-                    z_norm = max(0.0, min(1.0, b_val if b_val is not None else 0.0))
+                    # CRITICAL FIX: Database stores raw L*a*b* values, but Plot_3D requires 0-1 normalized values
+                    # Apply proper normalization to convert from raw color space to Plot_3D format
+                    # L*: 0-100 → 0-1
+                    # a*: -128 to +127 → 0-1 
+                    # b*: -128 to +127 → 0-1
+                    
+                    # Normalize L* (0-100) to X (0-1)
+                    x_norm = max(0.0, min(1.0, (l_val if l_val is not None else 0.0) / 100.0))
+                    
+                    # Normalize a* (-128 to +127) to Y (0-1)
+                    y_norm = max(0.0, min(1.0, ((a_val if a_val is not None else 0.0) + 128.0) / 255.0))
+                    
+                    # Normalize b* (-128 to +127) to Z (0-1) 
+                    z_norm = max(0.0, min(1.0, ((b_val if b_val is not None else 0.0) + 128.0) / 255.0))
                     
                     # Debug output for first few rows
                     if i < 5:

@@ -275,15 +275,25 @@ class WorksheetManager:
         for i, measurement in enumerate(measurements):
             row = start_row + i
             
-            # Get Lab values
+            # Get Lab values - these are raw L*a*b* values from database that need normalization
             l_val = measurement.get('l_value', 0.0)
             a_val = measurement.get('a_value', 0.0)  
             b_val = measurement.get('b_value', 0.0)
             
-            # Use values as-is since normalization is handled by user preferences
-            self.worksheet.cell(row=row, column=1).value = l_val  # Xnorm
-            self.worksheet.cell(row=row, column=2).value = a_val  # Ynorm  
-            self.worksheet.cell(row=row, column=3).value = b_val  # Znorm
+            # CRITICAL FIX: Database stores raw L*a*b* values, but Plot_3D requires 0-1 normalized values
+            # Apply proper normalization to convert from raw color space to Plot_3D format
+            # L*: 0-100 → 0-1
+            # a*: -128 to +127 → 0-1 
+            # b*: -128 to +127 → 0-1
+            
+            # Normalize values regardless of export_normalized preference for Plot_3D compatibility
+            x_norm = max(0.0, min(1.0, (l_val if l_val is not None else 0.0) / 100.0))
+            y_norm = max(0.0, min(1.0, ((a_val if a_val is not None else 0.0) + 128.0) / 255.0))
+            z_norm = max(0.0, min(1.0, ((b_val if b_val is not None else 0.0) + 128.0) / 255.0))
+            
+            self.worksheet.cell(row=row, column=1).value = round(x_norm, 4)  # Xnorm (normalized L*)
+            self.worksheet.cell(row=row, column=2).value = round(y_norm, 4)  # Ynorm (normalized a*)  
+            self.worksheet.cell(row=row, column=3).value = round(z_norm, 4)  # Znorm (normalized b*)
             self.worksheet.cell(row=row, column=4).value = f"{sample_set_name}_Sample_{i+1:03d}"  # DataID
             
             # Default marker and color values
