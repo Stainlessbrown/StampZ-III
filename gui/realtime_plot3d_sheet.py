@@ -414,10 +414,6 @@ class RealtimePlot3DSheet:
         self.refresh_btn = ttk.Button(toolbar, text="Refresh from StampZ", command=self._refresh_from_stampz)
         self.refresh_btn.pack(side=tk.LEFT, padx=5)
         
-        # Add refresh from database button for when new analyses are performed
-        self.refresh_db_btn = ttk.Button(toolbar, text="Refresh from Database", command=self._refresh_from_database)
-        self.refresh_db_btn.pack(side=tk.LEFT, padx=5)
-        
         self.save_btn = ttk.Button(toolbar, text="Save to File", command=self._save_to_file)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         
@@ -479,29 +475,6 @@ class RealtimePlot3DSheet:
             import traceback
             print(f"Full traceback: {traceback.format_exc()}")
             messagebox.showwarning("Data Loading", f"Could not load initial data: {e}\n\nCheck terminal for details.")
-    
-    def _refresh_from_database(self):
-        """Refresh data from database - same as StampZ refresh but with different messaging."""
-        print(f"\n🔄 REFRESH FROM DATABASE BUTTON CLICKED - DEBUG TRACE")
-        try:
-            # Use the same logic as _refresh_from_stampz but with database-focused messaging
-            self._refresh_from_stampz()
-            
-            # Show success message specific to database refresh
-            messagebox.showinfo(
-                "Database Refresh Complete",
-                f"Successfully refreshed realtime datasheet with latest data from {self.sample_set_name} database.\n\n"
-                f"This includes any new color analyses that were performed since the worksheet was opened."
-            )
-            
-        except Exception as e:
-            logger.error(f"Error refreshing from database: {e}")
-            print(f"\n❌ DATABASE REFRESH ERROR: {e}")
-            messagebox.showerror(
-                "Database Refresh Failed", 
-                f"Could not refresh from database: {e}\n\n"
-                f"Check that the {self.sample_set_name} database is accessible."
-            )
     
     def _refresh_from_stampz(self):
         """Refresh data from StampZ color analysis database."""
