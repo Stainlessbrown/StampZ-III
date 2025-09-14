@@ -1388,9 +1388,12 @@ class RealtimePlot3DSheet:
             df_min_idx = updated_df.index.min()
             df_max_idx = updated_df.index.max()
             print(f"\n🚨 SELECTION MISMATCH DEBUG:")
-            print(f"  - You selected: rows 8-27 (20 rows)")
+            if kmeans_start_row is not None and kmeans_end_row is not None:
+                print(f"  - You selected: rows {kmeans_start_row}-{kmeans_end_row} ({kmeans_end_row-kmeans_start_row+1} rows)")
+            else:
+                print(f"  - You selected: (K-means selection info not provided)")
             print(f"  - DataFrame received: indices {df_min_idx}-{df_max_idx} ({len(updated_df)} rows)")
-            print(f"  - Expected mapping: DataFrame index {df_min_idx} should → sheet row 8 (display E9)")
+            print(f"  - Expected mapping: DataFrame index {df_min_idx} should map to display row {kmeans_start_row if kmeans_start_row else 'unknown'}")
             
             # Column indices based on self.PLOT3D_COLUMNS
             cluster_col_idx = 4  # Cluster column (E)

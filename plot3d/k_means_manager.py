@@ -492,6 +492,9 @@ class KmeansManager:
             self.data = df_copy
             
             if self.on_data_update:
+                # Store row selection info for worksheet callback
+                self.on_data_update._kmeans_start_row = start_row
+                self.on_data_update._kmeans_end_row = end_row
                 self.on_data_update(df_copy)
             
             return df_copy
