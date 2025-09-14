@@ -260,13 +260,14 @@ class KmeansManager:
                             subset_indices.append(last_index)
                             self.logger.info(f"Added missing last row (index {last_index}) to the selection")
                 
-            # Double-check the last row is included if it was requested
-            if end_row >= len(self.data):
-                last_index = len(self.data) - 1
-                if last_index not in subset_indices:
-                    self.logger.warning(f"CRITICAL: Last row still missing after initial checks!")
-                    subset_indices.append(last_index)
-                    self.logger.info(f"Force-added last row (index {last_index}) as final fallback")
+            # Skip automatic last-row inclusion for realtime mode - respect exact user selection
+            # (This logic was causing unselected rows to be included in clustering)
+            # if end_row >= len(self.data):
+            #     last_index = len(self.data) - 1
+            #     if last_index not in subset_indices:
+            #         self.logger.warning(f"CRITICAL: Last row still missing after initial checks!")
+            #         subset_indices.append(last_index)
+            #         self.logger.info(f"Force-added last row (index {last_index}) as final fallback")
                         
             # Log the indices being used for clustering
             if subset_indices:
@@ -725,21 +726,22 @@ class KmeansManager:
                 max_idx = len(self.data) - 1
                 if indices_list[-1] == max_idx:
                     self.logger.info("✅ Last row of data is included in the selection")
-                elif end >= len(self.data):  # Simplified condition for requesting last row
-                    self.logger.warning("❌ Last row of data should be included but isn't!")
-                    # Force inclusion of the last row as a fallback measure
-                    if max_idx not in indices_list:  # Only add if not already there
-                        indices_list.append(max_idx)
-                        self.logger.info(f"Forcing inclusion of last row {max_idx} as fallback measure")
-                        # Update the range to include the newly added last row
-                        zero_based_end = max_idx + 1
-                        
-                        # Create a new range that includes the last row
-                        final_range = range(zero_based_start, zero_based_end) 
-                        # Log the final indices after correction
-                        self.logger.info(f"Final indices after correction: {list(final_range)}")
-                        # Return the corrected range instead
-                        return final_range
+                # Skip automatic last-row inclusion - respect exact user selection  
+                # elif end >= len(self.data):  # Simplified condition for requesting last row
+                #     self.logger.warning("❌ Last row of data should be included but isn't!")
+                #     # Force inclusion of the last row as a fallback measure
+                #     if max_idx not in indices_list:  # Only add if not already there
+                #         indices_list.append(max_idx)
+                #         self.logger.info(f"Forcing inclusion of last row {max_idx} as fallback measure")
+                #         # Update the range to include the newly added last row
+                #         zero_based_end = max_idx + 1
+                #         
+                #         # Create a new range that includes the last row
+                #         final_range = range(zero_based_start, zero_based_end) 
+                #         # Log the final indices after correction
+                #         self.logger.info(f"Final indices after correction: {list(final_range)}")
+                #         # Return the corrected range instead
+                #         return final_range
         else:
             self.logger.warning("No indices selected - empty range")
             
