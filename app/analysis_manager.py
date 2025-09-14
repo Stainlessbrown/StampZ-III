@@ -374,7 +374,7 @@ class AnalysisManager:
                 'Centroid_Z', 'Sphere', 'Radius'
             ]
             
-                for i, measurement in enumerate(measurements):
+            for i, measurement in enumerate(measurements):
                 tr = TableRow()
                 
                 # CRITICAL FIX: Normalize raw L*a*b* values from database for Plot_3D
