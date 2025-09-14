@@ -311,27 +311,71 @@ class GroupDisplayManager:
         When disabled or no selection, all points are visible.
         When enabled, only selected points are visible.
         """
-        enabled = self.visibility_enabled.get()
-        num_selected = len(self.visible_indices)
-        
-        print(f"\n🔍 GROUP DISPLAY MASK DEBUG:")
-        print(f"  Visibility enabled: {enabled}")
-        print(f"  Selected indices count: {num_selected}")
-        print(f"  Selected indices: {sorted(list(self.visible_indices)) if self.visible_indices else 'None'}")
-        
-        if not enabled:
-            # When disabled, show all points
-            print(f"  → DISABLED: Showing all {len(self.df)} points")
-            return pd.Series(True, index=self.df.index)
-        
-        # When enabled, only show selected points
-        mask = pd.Series(False, index=self.df.index)  # Start with all False
-        if self.visible_indices:
-            mask.loc[list(self.visible_indices)] = True  # Set True for selected indices
-            visible_count = mask.sum()
-            print(f"  → ENABLED: Showing {visible_count}/{len(self.df)} points (only selected)")
-        else:
-            print(f"  → ENABLED: No selection, showing 0/{len(self.df)} points")
-        
-        return mask
+        try:
+            enabled = self.visibility_enabled.get()
+            num_selected = len(self.visible_indices)
+            
+            print(f"\n🔍 GROUP DISPLAY MASK DEBUG:")
+            print(f"  Visibility enabled: {enabled}")
+            print(f"  Selected indices count: {num_selected}")
+            print(f"  DataFrame shape: {self.df.shape if self.df is not None else 'None'}")
+            print(f"  DataFrame index: {list(self.df.index) if self.df is not None and len(self.df) < 10 else f'[0...{len(self.df)-1}]' if self.df is not None else 'None'}")
+            print(f"  Selected indices: {sorted(list(self.visible_indices)) if self.visible_indices else 'None'}")
+            
+            # Safety check: ensure we have a valid DataFrame
+            if self.df is None or len(self.df) == 0:
+                print(f"  → ERROR: No valid DataFrame, returning empty mask")
+                return pd.Series(dtype=bool)  # Return empty Series
+            
+            if not enabled:
+                # When disabled, show all points
+                print(f"  → DISABLED: Showing all {len(self.df)} points")
+                return pd.Series(True, index=self.df.index)
+            
+            # When enabled, only show selected points
+            mask = pd.Series(False, index=self.df.index)  # Start with all False
+            if self.visible_indices:
+                # CRITICAL FIX: Filter selected indices to only include valid ones
+                valid_indices = [idx for idx in self.visible_indices if idx in self.df.index]
+                invalid_indices = [idx for idx in self.visible_indices if idx not in self.df.index]
+                
+                if invalid_indices:
+                    print(f"  → WARNING: Found {len(invalid_indices)} invalid indices: {invalid_indices}")
+                    print(f"  → Removing invalid indices from selection")
+                    # Update the visible_indices to remove invalid ones
+                    self.visible_indices = set(valid_indices)
+                
+                if valid_indices:
+                    mask.loc[valid_indices] = True  # Set True for valid selected indices
+                    visible_count = mask.sum()
+                    print(f"  → ENABLED: Showing {visible_count}/{len(self.df)} points (only selected)")
+                else:
+                    print(f"  → ENABLED: No valid selection after filtering, showing 0/{len(self.df)} points")
+            else:
+                print(f"  → ENABLED: No selection, showing 0/{len(self.df)} points")
+            
+            # Final safety check: ensure mask index matches DataFrame index
+            if not mask.index.equals(self.df.index):
+                print(f"  → ERROR: Mask index doesn't match DataFrame index, creating new aligned mask")
+                # Create a new properly aligned mask
+                aligned_mask = pd.Series(False, index=self.df.index)
+                if enabled and valid_indices:
+                    aligned_mask.loc[valid_indices] = True
+                elif not enabled:
+                    aligned_mask.loc[:] = True
+                return aligned_mask
+            
+            return mask
+            
+        except Exception as e:
+            print(f"  → CRITICAL ERROR in get_visible_mask: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Fallback: return all-True mask to show all points
+            if self.df is not None and len(self.df) > 0:
+                print(f"  → FALLBACK: Returning all-True mask for {len(self.df)} points")
+                return pd.Series(True, index=self.df.index)
+            else:
+                print(f"  → FALLBACK: Returning empty mask")
+                return pd.Series(dtype=bool)
 

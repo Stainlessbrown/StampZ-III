@@ -477,13 +477,34 @@ class Plot3DApp:
                 print("Using default rotation")
             # Draw data points with appropriate markers
                 
-            # Get visibility mask first
+            # Get visibility mask first with error handling
             visible_mask = pd.Series(True, index=self.df.index)  # Default to all visible
             if hasattr(self, 'group_display_manager') and self.group_display_manager:
-                visible_mask = self.group_display_manager.get_visible_mask()
+                try:
+                    visible_mask = self.group_display_manager.get_visible_mask()
+                    print(f"Got visibility mask with {visible_mask.sum()} visible points out of {len(visible_mask)}")
+                except Exception as e:
+                    print(f"Error getting visibility mask: {e}")
+                    print(f"Using default all-visible mask")
+                    visible_mask = pd.Series(True, index=self.df.index)
 
-            # Only plot points that should be visible
-            visible_df = self.df[visible_mask]
+            # Only plot points that should be visible with additional safety check
+            try:
+                # Ensure mask index aligns with DataFrame index
+                if not visible_mask.index.equals(self.df.index):
+                    print(f"Warning: Visibility mask index mismatch, realigning...")
+                    print(f"DataFrame index: {list(self.df.index)[:10]}... (len={len(self.df.index)})")
+                    print(f"Mask index: {list(visible_mask.index)[:10]}... (len={len(visible_mask.index)})")
+                    # Create a new aligned mask
+                    aligned_mask = pd.Series(True, index=self.df.index)  # Default to show all
+                    visible_mask = aligned_mask
+                
+                visible_df = self.df[visible_mask]
+                print(f"Successfully created visible DataFrame with {len(visible_df)} rows")
+            except Exception as e:
+                print(f"Error filtering DataFrame with visibility mask: {e}")
+                print(f"Using complete DataFrame as fallback")
+                visible_df = self.df  # Use all data as fallback
             print("Plotting points with specific markers...")
             for idx, row in visible_df.iterrows():
                 data_id = row.get('DataID', f'Row {idx}')

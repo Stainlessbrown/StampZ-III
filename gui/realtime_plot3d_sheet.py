@@ -56,26 +56,42 @@ class RealtimePlot3DSheet:
         'orange', 'purple', 'brown', 'pink', 'lime', 'navy', 'teal', 'gray'
     ]
     
-    def __init__(self, parent, sample_set_name="StampZ_Analysis"):
+    def __init__(self, parent, sample_set_name="StampZ_Analysis", load_initial_data=True):
         self.parent = parent
         self.sample_set_name = sample_set_name
         self.current_file_path = None
         self.plot3d_app = None  # Reference to Plot_3D instance
         
-        print(f"DEBUG: Initializing RealtimePlot3DSheet for {sample_set_name}")
+        print(f"DEBUG: Initializing RealtimePlot3DSheet for {sample_set_name} (load_initial_data={load_initial_data})")
         
         try:
             self._create_window()
             print("DEBUG: Window created successfully")
             
+            print("DEBUG: About to setup spreadsheet...")
             self._setup_spreadsheet()
             print("DEBUG: Spreadsheet setup complete")
             
+            print("DEBUG: About to setup toolbar...")
             self._setup_toolbar()
             print("DEBUG: Toolbar setup complete")
             
-            self._load_initial_data()
-            print("DEBUG: Initial data loading complete")
+            # TEMPORARILY DISABLED: Add simple header after all setup is complete
+            # self._add_simple_header()  # Disabled to test freezing issue
+            
+            # Only load initial data if requested (default True for backward compatibility)
+            if load_initial_data:
+                print("DEBUG: About to load initial data...")
+                self._load_initial_data()
+                print("DEBUG: Initial data loading complete")
+            else:
+                print("DEBUG: Skipping initial data loading as requested")
+            
+            print("DEBUG: About to complete initialization...")
+            
+            # Force window to be responsive
+            self.window.update()
+            self.window.update_idletasks()
             
             print("DEBUG: RealtimePlot3DSheet initialization complete")
             
@@ -90,7 +106,7 @@ class RealtimePlot3DSheet:
         print(f"DEBUG: Creating window for {self.sample_set_name}")
         
         self.window = tk.Toplevel(self.parent)
-        self.window.title(f"Plot_3D Normalized Data - {self.sample_set_name} (0-1 Range)")
+        self.window.title(f"Plot_3D: {self.sample_set_name} - Normalized Data (0-1 Range)")
         self.window.geometry("1400x800")
         
         print("DEBUG: Window created, setting geometry...")
@@ -101,7 +117,7 @@ class RealtimePlot3DSheet:
         y = (self.window.winfo_screenheight() // 2) - (self.window.winfo_height() // 2)
         self.window.geometry(f"+{x}+{y}")
         
-        # macOS-specific window management (fix disappearing window issue)
+        # macOS-specific window management (simple approach)
         try:
             # Don't use transient to prevent window disappearing
             # self.window.transient(self.parent)  # Commented out
@@ -114,13 +130,43 @@ class RealtimePlot3DSheet:
             self.window.resizable(True, True)
             self.window.minsize(800, 600)
             
-            print("DEBUG: Window configured for macOS (independent window)")
+            print("DEBUG: Window configured for macOS (simple approach)")
         except Exception as window_error:
             print(f"DEBUG: Window configuration error: {window_error}")
         
         # Ensure window stays open
         self.window.protocol("WM_DELETE_WINDOW", self._on_window_close)
         print("DEBUG: Window setup complete")
+    
+    def _add_simple_header(self):
+        """Add simple header at the top of existing window."""
+        try:
+            print(f"DEBUG: Adding simple header for {self.sample_set_name}")
+            
+            # Create header frame at the very top (insert before existing widgets)
+            header_frame = tk.Frame(self.window, bg='lightsteelblue', relief='raised', bd=2)
+            header_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2, before=self.window.children[list(self.window.children.keys())[0]])
+            
+            # Sample set label (left side)
+            sample_label = tk.Label(header_frame, 
+                                   text=f"📊 SAMPLE SET: {self.sample_set_name}", 
+                                   font=('Arial', 14, 'bold'), 
+                                   fg='darkblue', 
+                                   bg='lightsteelblue')
+            sample_label.pack(side=tk.LEFT, padx=10, pady=5)
+            
+            # Data format info (right side)
+            format_label = tk.Label(header_frame, 
+                                   text="Plot_3D Normalized Data (0-1 Range)", 
+                                   font=('Arial', 10, 'italic'), 
+                                   fg='darkred',
+                                   bg='lightsteelblue')
+            format_label.pack(side=tk.RIGHT, padx=10, pady=5)
+            
+            print(f"DEBUG: Simple header added successfully")
+            
+        except Exception as e:
+            print(f"DEBUG: Simple header creation failed: {e} - continuing without header")
         
     def _setup_spreadsheet(self):
         """Setup the tksheet spreadsheet widget."""
@@ -176,13 +222,16 @@ class RealtimePlot3DSheet:
     def _apply_formatting(self):
         """Apply visual formatting to cells."""
         try:
-            # Ensure sheet has enough rows for formatting (dynamic minimum)
+            # Get current sheet size - don't force a minimum, work with what we have
             current_rows = self.sheet.get_total_rows()
-            min_rows = max(50, current_rows)  # Dynamic minimum - at least 50 rows for basic formatting
-            if current_rows < min_rows:
-                # Add empty rows for formatting (but don't enforce artificial limit)
-                empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * (min_rows - current_rows)
-                self.sheet.insert_rows(rows=empty_rows, idx=current_rows)
+            print(f"DEBUG: Applying formatting to {current_rows} existing rows (no artificial minimum)")
+            
+            # Clear any existing formatting first to prevent conflicts
+            try:
+                self.sheet.dehighlight_all()
+                print("DEBUG: Cleared all existing highlighting")
+            except Exception as clear_error:
+                print(f"DEBUG: Could not clear highlighting: {clear_error}")
             
             # Pink fill for protected areas (rows 2-7, columns A-H: A2:H7 non-user entry block)
             print("DEBUG: Applying pink formatting to protected areas...")
@@ -198,54 +247,69 @@ class RealtimePlot3DSheet:
             except Exception as pink_error:
                 print(f"DEBUG: Pink formatting error: {pink_error}")
             
-            # Column formatting as specified
+            # Column formatting - only apply to rows that actually have data
             logger.info("Applying column formatting...")
+            
+            # Find the last row with actual data to avoid formatting empty rows
+            last_data_row = current_rows
+            for row in range(current_rows - 1, 6, -1):  # Start from end, stop at row 7
+                try:
+                    # Check if any cell in this row has data
+                    row_data = [self.sheet.get_cell_data(row, col) for col in range(len(self.PLOT3D_COLUMNS))]
+                    if any(cell and str(cell).strip() for cell in row_data):
+                        last_data_row = row + 1
+                        break
+                except Exception:
+                    continue
+            
+            print(f"DEBUG: Formatting columns up to row {last_data_row} (data ends around row {last_data_row})")
             
             # Column G (index 6): salmon color from row 8 to end of data
             try:
-                total_rows = self.sheet.get_total_rows()
-                column_g_cells = [(row, 6) for row in range(7, total_rows)]  # Rows 8+ (0-indexed: 7+)
-                self.sheet.highlight_cells(
-                    cells=column_g_cells,
-                    bg='#FA8072',  # Salmon color
-                    fg='black'
-                )
-                logger.info(f"Column G formatted with salmon color (rows 8-{total_rows})")
+                if last_data_row > 7:  # Only apply if we have data rows
+                    column_g_cells = [(row, 6) for row in range(7, last_data_row)]  # Rows 8+ with data
+                    self.sheet.highlight_cells(
+                        cells=column_g_cells,
+                        bg='#FA8072',  # Salmon color
+                        fg='black'
+                    )
+                    logger.info(f"Column G formatted with salmon color (rows 8-{last_data_row})")
             except Exception as g_error:
                 logger.debug(f"Error formatting column G: {g_error}")
             
             # Column H (index 7): yellow color from row 8 to end of data
             try:
-                column_h_cells = [(row, 7) for row in range(7, total_rows)]  # Rows 8+ (0-indexed: 7+)
-                self.sheet.highlight_cells(
-                    cells=column_h_cells,
-                    bg='#FFFF99',  # Yellow color
-                    fg='black'
-                )
-                logger.info(f"Column H formatted with yellow color (rows 8-{total_rows})")
+                if last_data_row > 7:  # Only apply if we have data rows
+                    column_h_cells = [(row, 7) for row in range(7, last_data_row)]  # Rows 8+ with data
+                    self.sheet.highlight_cells(
+                        cells=column_h_cells,
+                        bg='#FFFF99',  # Yellow color
+                        fg='black'
+                    )
+                    logger.info(f"Column H formatted with yellow color (rows 8-{last_data_row})")
             except Exception as h_error:
                 logger.debug(f"Error formatting column H: {h_error}")
             
             # Column L (Sphere column, index 11): yellow color from row 2 to end of data  
             try:
-                column_l_cells = [(row, 11) for row in range(1, total_rows)]  # Rows 2+ (0-indexed: 1+)
-                self.sheet.highlight_cells(
-                    cells=column_l_cells,
-                    bg='#FFFF99',  # Yellow color
-                    fg='black'
-                )
-                logger.info(f"Column L formatted with yellow color (rows 2-{total_rows})")
+                if last_data_row > 1:  # Only apply if we have data
+                    column_l_cells = [(row, 11) for row in range(1, last_data_row)]  # Rows 2+ with data
+                    self.sheet.highlight_cells(
+                        cells=column_l_cells,
+                        bg='#FFFF99',  # Yellow color
+                        fg='black'
+                    )
+                    logger.info(f"Column L formatted with yellow color (rows 2-{last_data_row})")
             except Exception as l_error:
                 logger.debug(f"Error formatting column L: {l_error}")
             
-            # Center align all cells
+            # Center align cells with data (not empty rows)
             try:
-                # Apply center alignment to all cells in the sheet
-                total_rows = self.sheet.get_total_rows()
+                # Apply center alignment only to rows with data
                 total_cols = len(self.PLOT3D_COLUMNS)
-                all_cells = [(row, col) for row in range(total_rows) for col in range(total_cols)]
-                self.sheet.align_cells(cells=all_cells, align='center')
-                logger.info("Applied center alignment to all cells")
+                data_cells = [(row, col) for row in range(last_data_row) for col in range(total_cols)]
+                self.sheet.align_cells(cells=data_cells, align='center')
+                logger.info(f"Applied center alignment to data cells (rows 0-{last_data_row})")
             except Exception as align_error:
                 logger.debug(f"Error applying center alignment: {align_error}")
                 
@@ -374,11 +438,8 @@ class RealtimePlot3DSheet:
         self.import_menu_btn = ttk.Menubutton(toolbar, text="Import Data")
         self.import_menu_btn.pack(side=tk.LEFT, padx=5)
         
-        # Create import menu
+        # Create import menu - simplified to just legacy import
         import_menu = tk.Menu(self.import_menu_btn, tearoff=0)
-        import_menu.add_command(label="Import & Merge", command=self._import_and_merge)
-        import_menu.add_command(label="Import as New", command=self._import_as_new)
-        import_menu.add_separator()
         import_menu.add_command(label="Import from Plot_3D (Legacy)", command=self._import_from_plot3d)
         self.import_menu_btn.configure(menu=import_menu)
         
@@ -391,7 +452,7 @@ class RealtimePlot3DSheet:
         status_frame = ttk.Frame(toolbar)
         status_frame.pack(side=tk.RIGHT, padx=5)
         
-        ttk.Label(status_frame, text=f"Sample Set: {self.sample_set_name}", font=('Arial', 9, 'bold')).pack(side=tk.TOP, anchor='e')
+        ttk.Label(status_frame, text=f"Sample Set: {self.sample_set_name}", font=('Arial', 12, 'bold'), foreground='darkblue').pack(side=tk.TOP, anchor='e')
         ttk.Label(status_frame, text="Data Format: Normalized (0-1 range)", font=('Arial', 8, 'normal'), foreground='blue').pack(side=tk.TOP, anchor='e')
         
         # Auto-save status
@@ -422,15 +483,12 @@ class RealtimePlot3DSheet:
             from utils.color_analysis_db import ColorAnalysisDB
             from utils.user_preferences import UserPreferences
             
-            # HARD RULE: Plot_3D always uses normalized data (0-1 range)
-            # This ensures consistent 3D visualization without negative quadrants
-            use_normalized = True
-            logger.info("\n=== PLOT_3D NORMALIZATION RULE ===")
-            logger.info("Plot_3D ALWAYS uses normalized data (0-1 range)")
-            logger.info("L* (0-100) → X (0-1)")
-            logger.info("a* (-128 to +127) → Y (0-1)")
-            logger.info("b* (-128 to +127) → Z (0-1)")
-            logger.info("==================================\n")
+            # PLOT_3D DATA RULE: Data should already be in normalized (0-1 range) format
+            # Plot_3D only works with normalized data - no additional normalization needed
+            logger.info("\n=== PLOT_3D DATA HANDLING ===")
+            logger.info("Plot_3D data should already be normalized (0-1 range)")
+            logger.info("Using values as-is with safety constraints only")
+            logger.info("================================\n")
             
             # Get measurements from database
             db = ColorAnalysisDB(self.sample_set_name)
@@ -455,14 +513,15 @@ class RealtimePlot3DSheet:
                 except Exception:
                     pass  # Not critical if this fails
                 
-                # Calculate how many rows we need for database data
+                # Calculate how many rows we need for database data - NO ARTIFICIAL MINIMUM
                 regular_measurements_count = len([m for m in measurements if m.get('image_name') != 'CENTROIDS']) if measurements else 0
-                min_rows = max(50, regular_measurements_count + 20)  # Data + buffer, minimum 50
+                # FIXED: Use only what we need: 7 reserved rows + data rows + small buffer
+                min_rows = 7 + regular_measurements_count + 10  # 7 reserved (header + centroids) + data + 10 buffer
                 
                 # Create fresh sheet structure
                 empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
                 self.sheet.insert_rows(rows=empty_rows, idx=0)
-                print(f"  ✅ Created fresh sheet with {min_rows} rows ({regular_measurements_count} data + buffer)")
+                print(f"  ✅ Created fresh sheet with {min_rows} rows (7 reserved + {regular_measurements_count} data + 10 buffer)")
                 
             except Exception as clear_error:
                 logger.error(f"Error during complete refresh: {clear_error}")
@@ -531,40 +590,17 @@ class RealtimePlot3DSheet:
                     b_val = measurement.get('b_value', 0.0)
                     sample_type = measurement.get('sample_type', '')
                     
-                    # CRITICAL FIX: Detect if data is already normalized (from manual entry)
-                    # Manual entries have sample_type='manual_entry' and values in 0-1 range
-                    is_manual_entry = (sample_type == 'manual_entry')
-                    is_already_normalized = (is_manual_entry and 
-                                           0 <= l_val <= 1 and 
-                                           0 <= a_val <= 1 and 
-                                           0 <= b_val <= 1)
+                    # PLOT_3D RULE: Data should already be normalized (0-1 range)
+                    # Plot_3D only works with normalized data, so we should NOT normalize here
+                    # Use values as-is but constrain to 0-1 range for safety
+                    x_norm = max(0.0, min(1.0, l_val if l_val is not None else 0.0))
+                    y_norm = max(0.0, min(1.0, a_val if a_val is not None else 0.0))
+                    z_norm = max(0.0, min(1.0, b_val if b_val is not None else 0.0))
                     
-                    # Apply normalization based on user preference  
-                    if use_normalized and not is_already_normalized:
-                        # Normalize: L* (0-100) → (0-1), a*b* (-128 to +127) → (0-1)
-                        # Only normalize if data is NOT already normalized
-                        x_norm = l_val / 100.0 if l_val is not None else 0.0
-                        y_norm = (a_val + 128) / 256.0 if a_val is not None else 0.5
-                        z_norm = (b_val + 128) / 256.0 if b_val is not None else 0.5
-                        
-                        logger.info(f"NORMALIZED: Measurement {i+1}: L*={l_val:.2f} a*={a_val:.2f} b*={b_val:.2f} → X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
-                    elif is_already_normalized:
-                        # Data is already normalized, use as-is
-                        x_norm = l_val
-                        y_norm = a_val  
-                        z_norm = b_val
-                        
-                        logger.info(f"ALREADY NORMALIZED: Measurement {i+1}: using values as-is X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
-                    else:
-                        # Use raw Lab values 
-                        x_norm = l_val if l_val is not None else 0.0
-                        y_norm = a_val if a_val is not None else 0.0
-                        z_norm = b_val if b_val is not None else 0.0
-                        
-                        # Constrain to 0-1 range for safety
-                        x_norm = max(0.0, min(1.0, x_norm))
-                        y_norm = max(0.0, min(1.0, y_norm))
-                        z_norm = max(0.0, min(1.0, z_norm))
+                    # Debug output for first few rows
+                    if i < 5:
+                        print(f"    DEBUG: Row {i+1} PLOT_3D DATA: X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f} (no normalization applied)")
+                        logger.info(f"PLOT_3D DATA: Measurement {i+1}: using values as-is X={x_norm:.6f}, Y={y_norm:.6f}, Z={z_norm:.6f}")
                     
                     # CRITICAL FIX: Create proper DataID that matches database format
                     # Database stores image_name + coordinate_point separately
@@ -853,6 +889,9 @@ class RealtimePlot3DSheet:
                             sphere_color_val = str(sphere_color).strip() if sphere_color and str(sphere_color).strip() else None
                             
                             print(f"    🎯 Row {i} (CENTROID AREA): Processing cluster {cluster_id} centroid data")
+                            print(f"      Centroid coords: ({centroid_x_val}, {centroid_y_val}, {centroid_z_val})")
+                            print(f"      Sphere data: color={sphere_color_val}, radius={sphere_radius_val}")
+                            print(f"      Marker/color: {marker}/{color}")
                             
                             # Call insertion - Plot_3D will ignore NaN values appropriately
                             centroid_success = db.insert_or_update_centroid_data(
@@ -865,6 +904,8 @@ class RealtimePlot3DSheet:
                                 marker=marker,
                                 color=color
                             )
+                            
+                            print(f"    🔍 Row {i}: CENTROID save result = {centroid_success} for cluster {cluster_id}")
                             
                             if centroid_success:
                                 updated_count += 1
@@ -1003,6 +1044,11 @@ class RealtimePlot3DSheet:
                             pass
                     
                     # First, try to update existing measurement
+                    print(f"    🔄 Row {i}: Attempting UPDATE for {image_name} pt{coord_point}")
+                    print(f"      Data: cluster={cluster_id}, ∆E={delta_e_val}, marker={marker}, color={color}")
+                    print(f"      Centroid: ({centroid_x_val}, {centroid_y_val}, {centroid_z_val})")
+                    print(f"      Sphere: color={sphere_color_val}, radius={sphere_radius_val}")
+                    
                     success = db.update_plot3d_extended_values(
                         image_name=image_name,
                         coordinate_point=coord_point,
@@ -1017,6 +1063,8 @@ class RealtimePlot3DSheet:
                         color=color,
                         trendline_valid=True  # All valid data points are trendline-valid
                     )
+                    
+                    print(f"    🔍 Row {i}: UPDATE result = {success} for {image_name} pt{coord_point}")
                     
                     if success:
                         updated_count += 1
@@ -2173,240 +2221,51 @@ class RealtimePlot3DSheet:
             logger.error(f"Error in template export: {e}")
             return False
     
-    def _import_and_merge(self):
-        """Import external data and merge with existing realtime datasheet data.
-        
-        This adds new data to the existing sheet without overwriting existing entries.
-        """
-        print("DEBUG: Import & Merge button clicked")
-        try:
-            from utils.external_data_importer import ExternalDataImporter
-            
-            # Ask for file to import
-            file_path = filedialog.askopenfilename(
-                title="Import External Data to Merge",
-                filetypes=[
-                    ('CSV Files', '*.csv'),
-                    ('OpenDocument Spreadsheet', '*.ods'),
-                    ('Excel Workbook', '*.xlsx'),
-                    ('All files', '*.*')
-                ]
-            )
-            
-            if not file_path:
-                return  # User cancelled
-            
-            # Import the external data
-            importer = ExternalDataImporter()
-            result = self._import_external_data(importer, file_path)
-            
-            if not result.success:
-                return
-            
-            # Merge with existing data
-            current_rows = self.sheet.get_total_rows()
-            
-            # Get existing DataIDs to avoid duplicates (start from row 7 where data begins)
-            existing_dataids = set()
-            for row_idx in range(7, min(current_rows, 1000)):  # Start from data area (row 7)
-                try:
-                    dataid = self.sheet.get_cell_data(row_idx, 3)  # DataID column
-                    if dataid and str(dataid).strip():
-                        existing_dataids.add(str(dataid).strip())
-                except:
-                    continue
-            
-            # Filter out rows with duplicate DataIDs
-            rows_to_add = []
-            duplicates_skipped = 0
-            
-            for row in result.data:
-                dataid = str(row[3]).strip() if len(row) > 3 else ''  # DataID column
-                if dataid and dataid in existing_dataids:
-                    duplicates_skipped += 1
-                    continue
-                rows_to_add.append(row)
-            
-            # Add new rows to the sheet
-            if rows_to_add:
-                try:
-                    # Find the next available row after existing data (not after all rows)
-                    # Start checking from row 7 (data area) to find last non-empty row
-                    last_data_row = 6  # Default to just before data area
-                    for row_idx in range(7, min(current_rows, 200)):  # Check reasonable range
-                        try:
-                            # Check if any essential columns have data
-                            dataid = self.sheet.get_cell_data(row_idx, 3)  # DataID
-                            xnorm = self.sheet.get_cell_data(row_idx, 0)   # Xnorm
-                            if (dataid and str(dataid).strip()) or (xnorm and str(xnorm).strip()):
-                                last_data_row = row_idx
-                        except:
-                            continue
-                    
-                    # Start row is right after last data row, but at least at row 7
-                    start_row = max(last_data_row + 1, 7)
-                    
-                    # Ensure we don't exceed reasonable bounds and have enough space
-                    if start_row >= current_rows:
-                        # Need to add more rows to accommodate new data
-                        needed_rows = start_row + len(rows_to_add) - current_rows + 5  # +5 buffer
-                        if needed_rows > 0:
-                            padding_rows = [[''] * len(self.PLOT3D_COLUMNS)] * needed_rows
-                            self.sheet.insert_rows(rows=padding_rows, idx=current_rows)
-                    
-                    # Add empty rows first
-                    empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * len(rows_to_add)
-                    self.sheet.insert_rows(rows=empty_rows, idx=start_row)
-                    
-                    # Set the actual data
-                    for i, row in enumerate(rows_to_add):
-                        self.sheet.set_row_data(start_row + i, values=row)
-                    
-                    # Also handle any centroid data from the import
-                    centroids_added = 0
-                    if result.centroid_data:
-                        for cluster_id, centroid_row in result.centroid_data:
-                            if 0 <= cluster_id <= 5:  # Valid centroid area
-                                centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
-                                self.sheet.set_row_data(centroid_row_idx, values=centroid_row)
-                                centroids_added += 1
-                                logger.info(f"Merged centroid for cluster {cluster_id} to row {centroid_row_idx + 1}")
-                    
-                    # Reapply formatting
-                    self._apply_formatting()
-                    self._setup_validation()
-                    
-                    # Success message
-                    centroid_msg = f"\n• Added {centroids_added} K-means centroids" if centroids_added > 0 else ""
-                    messagebox.showinfo(
-                        "Merge Successful",
-                        f"✅ Successfully merged external data!\n\n"
-                        f"• Added {len(rows_to_add)} new data rows{centroid_msg}\n"
-                        f"• Skipped {duplicates_skipped} duplicate entries\n"
-                        f"• Total warnings: {len(result.warnings)}\n\n"
-                        f"Your existing data has been preserved."
-                    )
-                    
-                    logger.info(f"Merged {len(rows_to_add)} new rows from {file_path}")
-                    
-                except Exception as merge_error:
-                    logger.error(f"Error merging data: {merge_error}")
-                    messagebox.showerror("Merge Error", f"Failed to merge data: {merge_error}")
-            else:
-                messagebox.showinfo(
-                    "No New Data",
-                    f"No new data to merge - all {result.rows_imported} rows already exist in the sheet."
-                )
-                
-        except Exception as e:
-            logger.error(f"Error in import and merge: {e}")
-            messagebox.showerror("Import Error", f"Failed to import and merge data: {e}")
     
-    def _import_as_new(self):
-        """Import external data as a new realtime datasheet (doesn't affect database).
+    
+    def _populate_new_worksheet_with_data(self, worksheet, import_result):
+        """Populate a new worksheet with imported data.
         
-        This creates a fresh worksheet from external data without touching the database.
+        Args:
+            worksheet: RealTimePlot3DSheet instance to populate
+            import_result: ImportResult with data to populate
         """
-        print("DEBUG: Import as New button clicked")
         try:
-            from utils.external_data_importer import ExternalDataImporter
+            # Calculate rows needed
+            imported_data_rows = len(import_result.data) if import_result.data else 0
+            min_rows = 7 + imported_data_rows + 10  # 7 reserved rows + data + 10 buffer
             
-            # Warn about data replacement
-            if not messagebox.askyesno(
-                "Import as New Confirmation",
-                "⚠️ CREATE NEW WORKSHEET:\n\n"
-                "This will replace your current spreadsheet with data from an external file.\n\n"
-                "Your StampZ database will NOT be affected.\n"
-                "Your current worksheet data will be lost.\n\n"
-                "Are you sure you want to proceed?"
-            ):
-                return
+            # Clear the new sheet and set up structure
+            current_rows = worksheet.sheet.get_total_rows()
+            if current_rows > 0:
+                worksheet.sheet.delete_rows(0, current_rows)
             
-            # Ask for file to import
-            file_path = filedialog.askopenfilename(
-                title="Import External Data as New Worksheet",
-                filetypes=[
-                    ('CSV Files', '*.csv'),
-                    ('OpenDocument Spreadsheet', '*.ods'),
-                    ('Excel Workbook', '*.xlsx'),
-                    ('All files', '*.*')
-                ]
-            )
+            # Create structure
+            empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
+            worksheet.sheet.insert_rows(rows=empty_rows, idx=0)
             
-            if not file_path:
-                return  # User cancelled
+            # Insert centroid data first (rows 1-6)
+            if import_result.centroid_data:
+                for cluster_id, centroid_row in import_result.centroid_data:
+                    if 0 <= cluster_id <= 5:  # Valid centroid area
+                        centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
+                        worksheet.sheet.set_row_data(centroid_row_idx, values=centroid_row)
+                        logger.info(f"Populated centroid for cluster {cluster_id} in new worksheet")
             
-            # Import the external data
-            importer = ExternalDataImporter()
-            result = self._import_external_data(importer, file_path)
+            # Insert imported data starting at row 7 (data area)
+            if import_result.data:
+                for i, row in enumerate(import_result.data):
+                    worksheet.sheet.set_row_data(7 + i, values=row)
             
-            if not result.success:
-                return
+            # Apply formatting to the new worksheet
+            worksheet._apply_formatting()
+            worksheet._setup_validation()
             
-            # Clear current sheet completely and populate with new data
-            try:
-                # COMPLETE RESET: Clear all data and formatting
-                current_rows = self.sheet.get_total_rows()
-                print(f"DEBUG: Import as New - clearing {current_rows} existing rows")
-                
-                # Clear ALL rows if any exist
-                if current_rows > 0:
-                    self.sheet.delete_rows(0, current_rows)
-                    print(f"DEBUG: Deleted all {current_rows} rows")
-                
-                # Clear any existing formatting/highlighting
-                try:
-                    self.sheet.dehighlight_all()
-                    print("DEBUG: Cleared all highlighting")
-                except Exception as highlight_error:
-                    print(f"DEBUG: Highlight clearing failed (not critical): {highlight_error}")
-                
-                # Create fresh sheet structure with enough rows for imported data + buffer
-                imported_data_rows = len(result.data) if result.data else 0
-                imported_centroid_rows = len(result.centroid_data) if result.centroid_data else 0
-                min_rows = max(50, imported_data_rows + 20)  # Data + 20 row buffer, minimum 50
-                
-                empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
-                self.sheet.insert_rows(rows=empty_rows, idx=0)
-                print(f"DEBUG: Created fresh sheet with {min_rows} rows ({imported_data_rows} data + buffer)")
-                
-                # Insert centroid data first (rows 1-6)
-                if result.centroid_data:
-                    for cluster_id, centroid_row in result.centroid_data:
-                        if 0 <= cluster_id <= 5:  # Valid centroid area
-                            centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
-                            self.sheet.set_row_data(centroid_row_idx, values=centroid_row)
-                            logger.info(f"Imported centroid for cluster {cluster_id} to row {centroid_row_idx + 1}")
-                
-                # Insert imported data starting at row 7 (data area)
-                if result.data:
-                    # Set the actual data starting at row 7
-                    for i, row in enumerate(result.data):
-                        self.sheet.set_row_data(7 + i, values=row)
-                
-                # Reapply formatting
-                self._apply_formatting()
-                self._setup_validation()
-                
-                # Success message with clear database saving instructions
-                centroid_msg = f"\n• Imported {len(result.centroid_data)} K-means centroids" if result.centroid_data else ""
-                save_reminder = "\n\n⚠️ IMPORTANT: To preserve this data permanently:\n• Click 'Save Changes to DB' to update your StampZ database\n• Otherwise, reopening will reload from database (losing imports)"
-                messagebox.showinfo(
-                    "Import Successful",
-                    f"✅ Successfully created new worksheet from external data!\n\n"
-                    f"• Imported {result.rows_imported} data rows{centroid_msg}\n"
-                    f"• Total warnings: {len(result.warnings)}{save_reminder}"
-                )
-                
-                logger.info(f"Created new worksheet with {result.rows_imported} rows from {file_path}")
-                
-            except Exception as new_error:
-                logger.error(f"Error creating new worksheet: {new_error}")
-                messagebox.showerror("Import Error", f"Failed to create new worksheet: {new_error}")
-                
+            logger.info(f"Successfully populated new worksheet with {imported_data_rows} rows")
+            
         except Exception as e:
-            logger.error(f"Error in import as new: {e}")
-            messagebox.showerror("Import Error", f"Failed to import as new: {e}")
+            logger.error(f"Error populating new worksheet: {e}")
+            raise
     
     def _import_external_data(self, importer, file_path):
         """Helper method to import external data using the importer.

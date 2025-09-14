@@ -56,5 +56,10 @@ data/color_libraries/*_library.db
 # User preferences (personal settings, not starter defaults)
 preferences.json
 
+# Debug and development files
+debug_*.py
+test_db_*.py
+test_database_*.py
+
 # Logs
 *.log

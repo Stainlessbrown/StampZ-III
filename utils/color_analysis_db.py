@@ -341,7 +341,7 @@ class ColorAnalysisDB:
                             m.notes, m.is_averaged, m.source_samples_count, m.source_sample_ids
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
-                        ORDER BY s.image_name, m.coordinate_point, m.measurement_date
+                        ORDER BY m.id
                     """)
                     
                     measurements = []
@@ -382,7 +382,7 @@ class ColorAnalysisDB:
                             m.sphere_color, m.sphere_radius, m.trendline_valid
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
-                        ORDER BY m.measurement_date, s.image_name, m.coordinate_point
+                        ORDER BY m.id
                     """)
                     
                     measurements = []
@@ -704,7 +704,10 @@ class ColorAnalysisDB:
                 
                 if existing:
                     # Update existing centroid
-                    conn.execute("""
+                    print(f"    💾 CENTROID UPDATE: Updating existing centroid for cluster {cluster_id}")
+                    print(f"    Data: ({centroid_x}, {centroid_y}, {centroid_z}), sphere={sphere_color}/{sphere_radius}")
+                    
+                    cursor = conn.execute("""
                         UPDATE color_measurements SET
                             centroid_x = ?, centroid_y = ?, centroid_z = ?,
                             sphere_color = ?, sphere_radius = ?,
@@ -718,6 +721,9 @@ class ColorAnalysisDB:
                         marker, color, cluster_id,
                         set_id, coordinate_point
                     ))
+                    
+                    updated_rows = cursor.rowcount
+                    print(f"    📋 CENTROID UPDATE: Updated {updated_rows} rows for cluster {cluster_id}")
                     print(f"✅ UPDATED centroid for cluster {cluster_id}: ({centroid_x:.3f}, {centroid_y:.3f}, {centroid_z:.3f})")
                 else:
                     # Insert new centroid (using centroid coords as Lab values for compatibility)
@@ -728,7 +734,11 @@ class ColorAnalysisDB:
                     a_val = centroid_y if centroid_y is not None else 0.0
                     b_val = centroid_z if centroid_z is not None else 0.0
                     
-                    conn.execute("""
+                    print(f"    🆕 CENTROID INSERT: Creating new centroid for cluster {cluster_id}")
+                    print(f"    Data: ({centroid_x}, {centroid_y}, {centroid_z}), sphere={sphere_color}/{sphere_radius}")
+                    print(f"    Lab values: L={l_val}, a={a_val}, b={b_val}")
+                    
+                    cursor = conn.execute("""
                         INSERT INTO color_measurements (
                             set_id, coordinate_point, x_position, y_position,
                             l_value, a_value, b_value, rgb_r, rgb_g, rgb_b,
@@ -744,6 +754,9 @@ class ColorAnalysisDB:
                         cluster_id, centroid_x, centroid_y, centroid_z,  # Store original values (may be None)
                         sphere_color, sphere_radius, 1  # Centroids are always trendline-valid
                     ))
+                    
+                    inserted_rows = cursor.rowcount
+                    print(f"    📋 CENTROID INSERT: Inserted {inserted_rows} rows for cluster {cluster_id}")
                     print(f"✅ INSERTED new centroid for cluster {cluster_id}: ({centroid_x:.3f}, {centroid_y:.3f}, {centroid_z:.3f})")
                 
                 return True
@@ -837,14 +850,21 @@ class ColorAnalysisDB:
                     ) AND coordinate_point = ?
                 """
                 
+                print(f"    💾 DB UPDATE: Executing query for {image_name} pt{coordinate_point}")
+                print(f"    Query: {query}")
+                print(f"    Values: {values}")
+                
                 cursor = conn.execute(query, values)
                 updated_rows = cursor.rowcount
+                
+                print(f"    📋 DB UPDATE: Updated {updated_rows} rows for {image_name} pt{coordinate_point}")
                 
                 if updated_rows > 0:
                     logger.debug(f"Updated Plot_3D values for {image_name} point {coordinate_point}: {len(update_parts)} fields")
                     return True
                 else:
                     logger.debug(f"No measurement found for {image_name} point {coordinate_point}")
+                    print(f"    ⚠️ DB UPDATE: No rows found to update for {image_name} pt{coordinate_point}")
                     return False
                     
         except sqlite3.Error as e:

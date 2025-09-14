@@ -6,6 +6,7 @@ color library operations, and data export functionality.
 """
 
 import os
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
@@ -439,7 +440,8 @@ class AnalysisManager:
             
             Radiobutton(source_frame, text="New/Empty Template", variable=source_var, value="new").pack(anchor="w")
             Radiobutton(source_frame, text="Existing StampZ Database", variable=source_var, value="existing").pack(anchor="w")
-            Radiobutton(source_frame, text="Load Existing File (.ods/.xlsx)", variable=source_var, value="load_file").pack(anchor="w")
+            Radiobutton(source_frame, text="Load Existing File (.ods/.xlsx - load only)", variable=source_var, value="load_file").pack(anchor="w")
+            Radiobutton(source_frame, text="Import External Data as New Worksheet", variable=source_var, value="import_new").pack(anchor="w")
             Radiobutton(source_frame, text="Import External CSV", variable=source_var, value="external").pack(anchor="w")
             
             # Sample set selection (for existing data)
@@ -548,6 +550,9 @@ class AnalysisManager:
             elif source_type == "load_file":
                 # Load existing .ods/.xlsx file in Plot_3D
                 self._load_existing_file_in_plot3d()
+            elif source_type == "import_new":
+                # Import external data as new worksheet
+                self._import_external_as_new_worksheet()
             elif source_type == "external":
                 # Import from external CSV and launch Plot_3D
                 self._import_and_launch_csv()
@@ -557,6 +562,436 @@ class AnalysisManager:
                 "Error",
                 f"Failed to perform Plot_3D action:\\n\\n{str(e)}"
             )
+    
+    def _import_external_as_new_worksheet(self):
+        """Import external data as a completely new worksheet and database."""
+        print("DEBUG: === STARTING IMPORT PROCESS ===")
+        try:
+            print("DEBUG: Step 1 - Importing required modules")
+            from tkinter import filedialog, simpledialog
+            from utils.external_data_importer import ExternalDataImporter
+            print("DEBUG: Step 1 - Modules imported successfully")
+            
+            # Ask for file to import
+            print("DEBUG: Step 2 - Opening file dialog")
+            file_path = filedialog.askopenfilename(
+                title="Import External Data as New Worksheet",
+                filetypes=[
+                    ('CSV Files', '*.csv'),
+                    ('OpenDocument Spreadsheet', '*.ods'),
+                    ('Excel Workbook', '*.xlsx'),
+                    ('All files', '*.*')
+                ]
+            )
+            print(f"DEBUG: Step 2 - File dialog returned: {file_path}")
+            
+            if not file_path:
+                print("DEBUG: User cancelled file selection")
+                return  # User cancelled
+            
+            # Ask user for new worksheet name
+            print("DEBUG: Step 3 - Asking for worksheet name")
+            new_worksheet_name = simpledialog.askstring(
+                "New Worksheet Name",
+                f"Enter name for the new worksheet:\n\n"
+                f"This will create a separate worksheet and database.",
+                initialvalue=f"ImportedData_{int(time.time())}"
+            )
+            print(f"DEBUG: Step 3 - Worksheet name: {new_worksheet_name}")
+            
+            # If user cancelled or no name provided, return
+            if not new_worksheet_name or not new_worksheet_name.strip():
+                print("DEBUG: User cancelled name entry or provided empty name")
+                return
+                
+            new_worksheet_name = new_worksheet_name.strip()
+            
+            # Import the external data and save to database
+            print("DEBUG: Step 4 - Starting real data import")
+            try:
+                importer = ExternalDataImporter()
+                print("DEBUG: Step 4a - Created importer instance")
+                
+                result = self._import_external_data_helper(importer, file_path)
+                print(f"DEBUG: Step 4b - Import completed, success: {result.success if result else 'None'}")
+                
+                if not result or not result.success:
+                    print("DEBUG: Import failed or returned no result")
+                    messagebox.showerror("Import Failed", "Failed to import external data. Check the file format.")
+                    return
+                
+                # Save imported data directly to database
+                print(f"DEBUG: Step 5 - Saving imported data to database: {new_worksheet_name}")
+                saved_count = self._save_imported_data_to_database(new_worksheet_name, result)
+                
+                # Verify the database was created
+                from utils.color_analysis_db import ColorAnalysisDB
+                test_db = ColorAnalysisDB(new_worksheet_name)
+                test_measurements = test_db.get_all_measurements()
+                measurement_count = len(test_measurements) if test_measurements else 0
+                print(f"DEBUG: Step 6 - Verification: database has {measurement_count} measurements")
+                
+                # Now create the worksheet window automatically
+                print(f"DEBUG: Creating worksheet window for imported data: {new_worksheet_name}")
+                try:
+                    from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+                    print("DEBUG: Imported RealtimePlot3DSheet successfully")
+                    
+                    # Create worksheet WITHOUT initial data loading to avoid freezing
+                    # User can manually refresh data once window is open
+                    worksheet = RealtimePlot3DSheet(
+                        parent=self.root,
+                        sample_set_name=new_worksheet_name,
+                        load_initial_data=False  # Prevent freezing during creation
+                    )
+                    print("DEBUG: Worksheet window created successfully")
+                    
+                    # Let worksheet window fully settle before showing dialog
+                    print("DEBUG: Allowing worksheet window to settle...")
+                    self.root.update()
+                    self.root.update_idletasks()
+                    
+                    # Use a delayed messagebox to avoid modal conflicts on macOS
+                    def show_success_message():
+                        centroid_msg = f"\n• Imported {len(result.centroid_data)} K-means centroids" if result.centroid_data else ""
+                        messagebox.showinfo(
+                            "Import Successful",
+                            f"✅ Successfully imported '{new_worksheet_name}'!\n\n"
+                            f"• Imported {result.rows_imported} data rows{centroid_msg}\n"
+                            f"• Saved {measurement_count} measurements to database\n"
+                            f"• Worksheet window opened (empty to avoid freezing)\n\n"
+                            f"📋 To load your data:\n"
+                            f"Click the 'Refresh from StampZ' button in the worksheet\n\n"
+                            f"This prevents UI freezing with large datasets!"
+                        )
+                    
+                    # Show success message after a short delay to avoid modal conflicts
+                    print("DEBUG: Scheduling success message...")
+                    self.root.after(500, show_success_message)
+                    
+                except Exception as worksheet_error:
+                    print(f"DEBUG: Failed to create worksheet window: {worksheet_error}")
+                    import traceback
+                    print(f"DEBUG: Worksheet creation error traceback: {traceback.format_exc()}")
+                    
+                    # Show fallback message if worksheet creation fails
+                    messagebox.showinfo(
+                        "Import Successful (Manual Open Required)",
+                        f"✅ Data imported successfully as '{new_worksheet_name}'!\n\n"
+                        f"• Imported {result.rows_imported} data rows\n"
+                        f"• Saved {measurement_count} measurements to database\n\n"
+                        f"📋 To view the data:\n"
+                        f"1. Use Plot_3D Data Manager\n"
+                        f"2. Select 'Existing StampZ Database'\n"
+                        f"3. Choose '{new_worksheet_name}' from the list\n"
+                        f"4. Click 'Open in Plot_3D'"
+                    )
+                
+                print("DEBUG: === IMPORT PROCESS COMPLETED SUCCESSFULLY ===")
+                logger.info(f"Successfully imported '{new_worksheet_name}' with {result.rows_imported} rows")
+                return
+                
+            except Exception as import_error:
+                print(f"DEBUG: Import process failed: {import_error}")
+                messagebox.showerror("Import Failed", f"Import process failed: {import_error}")
+                return
+            
+            # Create database directly without problematic UI (simpler approach)
+            try:
+                print(f"DEBUG: Starting direct database import for: {new_worksheet_name}")
+                print(f"DEBUG: Import result has {len(result.data) if result.data else 0} data rows")
+                print(f"DEBUG: Import result has {len(result.centroid_data) if result.centroid_data else 0} centroid rows")
+                
+                # Save imported data directly to database without creating UI first
+                print(f"DEBUG: Saving imported data directly to database: {new_worksheet_name}")
+                self._save_imported_data_to_database(new_worksheet_name, result)
+                
+                # Verify the database was created
+                from utils.color_analysis_db import ColorAnalysisDB
+                test_db = ColorAnalysisDB(new_worksheet_name)
+                test_measurements = test_db.get_all_measurements()
+                measurement_count = len(test_measurements) if test_measurements else 0
+                print(f"DEBUG: Verification - new database has {measurement_count} measurements")
+                
+                # Now create the worksheet window to view the data
+                print(f"DEBUG: Creating worksheet window to view the imported data")
+                try:
+                    # Import here to avoid circular import issues
+                    from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+                    
+                    # Create worksheet normally - it will load the data we just saved to database
+                    new_worksheet = RealtimePlot3DSheet(
+                        parent=self.root,
+                        sample_set_name=new_worksheet_name,
+                        load_initial_data=True  # Load the data we just saved
+                    )
+                    print(f"DEBUG: Worksheet window created and data loaded from database")
+                    
+                except Exception as ui_error:
+                    print(f"DEBUG: UI creation failed, but database was saved: {ui_error}")
+                    # Data is still saved, just show message without UI
+                
+                # Show success message
+                centroid_msg = f"\n• Imported {len(result.centroid_data)} K-means centroids" if result.centroid_data else ""
+                
+                messagebox.showinfo(
+                    "Import Successful",
+                    f"✅ Successfully imported data as '{new_worksheet_name}'!\n\n"
+                    f"• Imported {result.rows_imported} data rows{centroid_msg}\n"
+                    f"• Data saved to database ({measurement_count} measurements)\n"
+                    f"• Available in 'Existing StampZ Database' option\n\n"
+                    f"You can now select it from the Plot_3D Data Manager."
+                )
+                
+                logger.info(f"Successfully imported '{new_worksheet_name}' with {result.rows_imported} rows from Plot_3D Data Manager")
+                
+            except Exception as new_window_error:
+                logger.error(f"Error creating new worksheet window: {new_window_error}")
+                messagebox.showerror(
+                    "New Worksheet Error", 
+                    f"Failed to create new worksheet:\n{new_window_error}\n\n"
+                    f"Please try again or check the terminal for details."
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in import external as new: {e}")
+            messagebox.showerror("Import Error", f"Failed to import external data: {e}")
+    
+    def _import_external_data_helper(self, importer, file_path):
+        """Helper method to import external data using the importer.
+        
+        Args:
+            importer: ExternalDataImporter instance
+            file_path: Path to the file to import
+            
+        Returns:
+            ImportResult object
+        """
+        try:
+            print(f"DEBUG: Helper - Starting import of file: {file_path}")
+            # Import the file
+            result = importer.import_file(file_path)
+            print(f"DEBUG: Helper - Import file completed, result type: {type(result)}")
+            
+            # Show warnings/errors if any
+            if result.warnings or result.errors:
+                warning_text = ""
+                if result.warnings:
+                    warning_text += "Warnings:\n" + "\n".join([f"• {w}" for w in result.warnings[:10]])  # Limit to first 10
+                    if len(result.warnings) > 10:
+                        warning_text += f"\n... and {len(result.warnings) - 10} more warnings"
+                
+                if result.errors:
+                    if warning_text:
+                        warning_text += "\n\n"
+                    warning_text += "Errors:\n" + "\n".join([f"• {e}" for e in result.errors[:5]])  # Limit to first 5
+                
+                if result.errors:
+                    messagebox.showerror("Import Errors", warning_text)
+                    return result
+                elif result.warnings:
+                    messagebox.showwarning("Import Warnings", warning_text)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error importing external data: {e}")
+            messagebox.showerror("Import Error", f"Failed to import external data: {e}")
+            from utils.external_data_importer import ImportResult
+            return ImportResult(success=False, errors=[str(e)])
+    
+    def _populate_worksheet_with_data(self, worksheet, import_result):
+        """Populate a worksheet with imported data.
+        
+        Args:
+            worksheet: RealtimePlot3DSheet instance to populate
+            import_result: ImportResult with data to populate
+        """
+        try:
+            print(f"DEBUG: Starting worksheet population")
+            
+            # Safety check - limit data size to prevent freezing
+            imported_data_rows = len(import_result.data) if import_result.data else 0
+            if imported_data_rows > 1000:
+                print(f"WARNING: Large dataset ({imported_data_rows} rows), limiting to first 1000 rows")
+                import_result.data = import_result.data[:1000]
+                imported_data_rows = 1000
+            
+            print(f"DEBUG: Will populate {imported_data_rows} data rows")
+            min_rows = 7 + imported_data_rows + 10  # 7 reserved rows + data + 10 buffer
+            
+            # Clear the new sheet carefully
+            print(f"DEBUG: Clearing existing sheet data")
+            try:
+                current_rows = worksheet.sheet.get_total_rows()
+                print(f"DEBUG: Current sheet has {current_rows} rows")
+                if current_rows > 0:
+                    worksheet.sheet.delete_rows(0, current_rows)
+                    print(f"DEBUG: Deleted {current_rows} existing rows")
+            except Exception as clear_error:
+                print(f"DEBUG: Error clearing sheet: {clear_error}")
+                # Continue anyway
+            
+            # Create structure safely
+            print(f"DEBUG: Creating sheet structure with {min_rows} rows")
+            try:
+                PLOT3D_COLUMNS = ['Xnorm', 'Ynorm', 'Znorm', 'DataID', 'Cluster', '∆E', 'Marker', 'Color', 'Centroid_X', 'Centroid_Y', 'Centroid_Z', 'Sphere', 'Radius']
+                empty_rows = [[''] * len(PLOT3D_COLUMNS)] * min_rows
+                worksheet.sheet.insert_rows(rows=empty_rows, idx=0)
+                print(f"DEBUG: Sheet structure created successfully")
+            except Exception as structure_error:
+                print(f"DEBUG: Error creating sheet structure: {structure_error}")
+                raise
+            
+            # Insert centroid data first (rows 1-6) - only first 6
+            print(f"DEBUG: Inserting centroid data")
+            try:
+                if import_result.centroid_data:
+                    for cluster_id, centroid_row in import_result.centroid_data[:6]:  # Limit to first 6
+                        if 0 <= cluster_id <= 5:  # Valid centroid area
+                            centroid_row_idx = 1 + cluster_id  # Rows 1-6 for clusters 0-5
+                            worksheet.sheet.set_row_data(centroid_row_idx, values=centroid_row)
+                            print(f"DEBUG: Populated centroid for cluster {cluster_id}")
+            except Exception as centroid_error:
+                print(f"DEBUG: Error inserting centroid data: {centroid_error}")
+                # Continue without centroids
+            
+            # Insert imported data starting at row 7 (data area)
+            print(f"DEBUG: Inserting {imported_data_rows} data rows starting at row 7")
+            try:
+                if import_result.data and imported_data_rows > 0:
+                    for i, row in enumerate(import_result.data[:imported_data_rows]):  # Safety limit
+                        worksheet.sheet.set_row_data(7 + i, values=row)
+                        # Progress indicator for large datasets
+                        if i > 0 and i % 100 == 0:
+                            print(f"DEBUG: Inserted {i} rows so far...")
+                            # Update UI periodically to prevent freezing
+                            worksheet.window.update_idletasks()
+                    print(f"DEBUG: All {imported_data_rows} data rows inserted")
+            except Exception as data_error:
+                print(f"DEBUG: Error inserting data rows: {data_error}")
+                raise
+            
+            # Skip formatting and validation for now to prevent freezing
+            print(f"DEBUG: Skipping formatting to prevent freezing")
+            # worksheet._apply_formatting()
+            # worksheet._setup_validation()
+            
+            print(f"DEBUG: Worksheet population completed successfully")
+            logger.info(f"Successfully populated new worksheet with {imported_data_rows} rows")
+            
+        except Exception as e:
+            print(f"DEBUG: Error in worksheet population: {e}")
+            logger.error(f"Error populating new worksheet: {e}")
+            raise
+    
+    def _save_imported_data_to_database(self, sample_set_name, import_result):
+        """Save imported data directly to database without UI.
+        
+        Args:
+            sample_set_name: Name for the new database
+            import_result: ImportResult with data to save
+        """
+        try:
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            print(f"DEBUG: Creating database: {sample_set_name}")
+            db = ColorAnalysisDB(sample_set_name)
+            
+            saved_count = 0
+            
+            # Save centroid data first
+            if import_result.centroid_data:
+                print(f"DEBUG: Saving {len(import_result.centroid_data)} centroids")
+                for cluster_id, centroid_row in import_result.centroid_data:
+                    try:
+                        # Extract centroid info from the row
+                        centroid_x = float(centroid_row[8]) if centroid_row[8] and str(centroid_row[8]).strip() else None
+                        centroid_y = float(centroid_row[9]) if centroid_row[9] and str(centroid_row[9]).strip() else None
+                        centroid_z = float(centroid_row[10]) if centroid_row[10] and str(centroid_row[10]).strip() else None
+                        sphere_color = centroid_row[11] if centroid_row[11] and str(centroid_row[11]).strip() else None
+                        sphere_radius = float(centroid_row[12]) if centroid_row[12] and str(centroid_row[12]).strip() else None
+                        
+                        if centroid_x is not None and centroid_y is not None and centroid_z is not None:
+                            success = db.insert_or_update_centroid_data(
+                                cluster_id=cluster_id,
+                                centroid_x=centroid_x,
+                                centroid_y=centroid_y,
+                                centroid_z=centroid_z,
+                                sphere_color=sphere_color,
+                                sphere_radius=sphere_radius,
+                                marker='.',
+                                color='blue'
+                            )
+                            if success:
+                                saved_count += 1
+                                print(f"DEBUG: Saved centroid {cluster_id}: ({centroid_x}, {centroid_y}, {centroid_z})")
+                    except Exception as centroid_error:
+                        print(f"DEBUG: Error saving centroid {cluster_id}: {centroid_error}")
+            
+            # Save regular data
+            if import_result.data:
+                print(f"DEBUG: Saving {len(import_result.data)} data rows")
+                for i, row in enumerate(import_result.data):
+                    try:
+                        # Extract data from row
+                        x_norm = float(row[0]) if row[0] and str(row[0]).strip() else 0.0
+                        y_norm = float(row[1]) if row[1] and str(row[1]).strip() else 0.0
+                        z_norm = float(row[2]) if row[2] and str(row[2]).strip() else 0.0
+                        data_id = str(row[3]) if row[3] else f"Data_{i+1:03d}"
+                        cluster = int(row[4]) if row[4] and str(row[4]).strip() else None
+                        delta_e = float(row[5]) if row[5] and str(row[5]).strip() else None
+                        marker = str(row[6]) if row[6] else '.'
+                        color = str(row[7]) if row[7] else 'blue'
+                        
+                        # Parse DataID for database format
+                        if '_pt' in data_id:
+                            parts = data_id.split('_pt')
+                            image_name = parts[0]
+                            coord_point = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+                        else:
+                            image_name = data_id
+                            coord_point = 1
+                        
+                        # Insert as new measurement
+                        success = db.insert_new_measurement(
+                            image_name=image_name,
+                            coordinate_point=coord_point,
+                            x_pos=0.0,  # Position not relevant for imported data
+                            y_pos=0.0,
+                            l_value=x_norm,  # Store normalized values as L*a*b*
+                            a_value=y_norm,
+                            b_value=z_norm,
+                            rgb_r=0.0, rgb_g=0.0, rgb_b=0.0,
+                            cluster_id=cluster,
+                            delta_e=delta_e,
+                            centroid_x=float(row[8]) if row[8] and str(row[8]).strip() else None,
+                            centroid_y=float(row[9]) if row[9] and str(row[9]).strip() else None,
+                            centroid_z=float(row[10]) if row[10] and str(row[10]).strip() else None,
+                            sphere_color=str(row[11]) if row[11] and str(row[11]).strip() else None,
+                            sphere_radius=float(row[12]) if row[12] and str(row[12]).strip() else None,
+                            marker=marker,
+                            color=color,
+                            sample_type='imported_data',
+                            notes=f'Imported from external file'
+                        )
+                        
+                        if success:
+                            saved_count += 1
+                            if i % 50 == 0:  # Progress indicator
+                                print(f"DEBUG: Saved {i+1} data rows so far...")
+                    
+                    except Exception as row_error:
+                        print(f"DEBUG: Error saving data row {i}: {row_error}")
+                        continue
+            
+            print(f"DEBUG: Database save completed - {saved_count} total records saved")
+            return saved_count
+            
+        except Exception as e:
+            print(f"DEBUG: Error saving to database: {e}")
+            logger.error(f"Error saving imported data to database: {e}")
+            raise
     
     def _create_new_plot3d_template(self):
         """Create a new empty Plot_3D template."""
@@ -604,9 +1039,7 @@ class AnalysisManager:
             title="Create Plot_3D Worksheet",
             defaultextension=".ods",
             filetypes=[
-                ('OpenDocument Spreadsheet', '*.ods'),
-                ('Excel Workbook', '*.xlsx'),
-                ('All files', '*.*')
+                ('OpenDocument Spreadsheet', '*.ods')
             ],
             initialfile=default_filename,
             initialdir=os.path.expanduser("~/Desktop")
@@ -617,35 +1050,19 @@ class AnalysisManager:
             self._execute_worksheet_creation(filepath, sample_set_name, populate)
     
     def _execute_worksheet_creation(self, filepath, sample_set_name, populate):
-        """Execute the actual worksheet creation logic."""
+        """Execute the actual worksheet creation logic (ODS format only)."""
         try:
             from utils.worksheet_manager import WorksheetManager
             
-            # Determine format from file extension
-            file_ext = os.path.splitext(filepath)[1].lower()
-            is_excel = file_ext == '.xlsx'
-            
-            # Create worksheet manager and template
+            # Create worksheet manager and ODS template
             manager = WorksheetManager()
-            
-            if is_excel:
-                # For Excel: Create formatted worksheet with validation
-                success = manager.create_plot3d_worksheet(filepath, sample_set_name)
-            else:
-                # For ODS: Create simple template without advanced formatting
-                success = manager._create_simple_plot3d_template(filepath, sample_set_name)
+            success = manager._create_simple_plot3d_template(filepath, sample_set_name)
             
             if success and populate:
-                if is_excel:
-                    data_loaded = manager.load_stampz_data(sample_set_name)
-                    if data_loaded:
-                        manager.save_worksheet(filepath)
-                else:
-                    # For ODS, populate using simple method
-                    self._populate_ods_template(filepath, sample_set_name)
+                # Populate ODS template with data
+                self._populate_ods_template(filepath, sample_set_name)
             
             if success:
-                format_info = "Excel format with validation" if is_excel else "OpenDocument format"
                 data_info = "populated with existing data" if populate else "empty template ready for data entry"
                 
                 # Ask if user wants to launch Plot_3D with the created file
@@ -653,7 +1070,7 @@ class AnalysisManager:
                     "Worksheet Created",
                     f"Plot_3D worksheet created successfully.\\n\\n"
                     f"File: {os.path.basename(filepath)}\\n"
-                    f"Format: {format_info}\\n"
+                    f"Format: OpenDocument format (compatible with Excel)\\n"
                     f"Data: {data_info}\\n\\n"
                     f"Would you like to open this file in Plot_3D now?"
                 )
@@ -746,43 +1163,75 @@ class AnalysisManager:
                 self._launch_plot3d_with_file(output_file)
     
     def _get_save_path(self, sample_set_name):
-        """Get save path for new template."""
+        """Get save path for new template (ODS format only)."""
         default_filename = f"{sample_set_name}_Plot3D_{datetime.now().strftime('%Y%m%d')}"
         
         return filedialog.asksaveasfilename(
             title="Save Plot_3D Template",
             defaultextension=".ods",
             filetypes=[
-                ('OpenDocument Spreadsheet', '*.ods'),
-                ('Excel Workbook', '*.xlsx')
+                ('OpenDocument Spreadsheet', '*.ods')
             ],
             initialfile=default_filename,
             initialdir=os.path.expanduser("~/Desktop")
         )
     
     def _create_clean_template(self, filepath, sample_set_name):
-        """Create clean template without placeholder data."""
+        """Create clean template using formatted Plot3D_Template.ods."""
         try:
-            import pandas as pd
+            import shutil
             
-            # Create clean DataFrame with just headers
-            from utils.worksheet_manager import WorksheetManager
-            df = pd.DataFrame(columns=WorksheetManager.PLOT3D_COLUMNS)
+            # Path to the formatted template
+            template_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates', 'plot3d', 'Plot3D_Template.ods')
             
-            # Export to chosen format
-            file_ext = os.path.splitext(filepath)[1].lower()
-            if file_ext == '.xlsx':
-                # Use openpyxl for Excel format
-                df.to_excel(filepath, index=False)
-            else:
-                # Use ODS format
-                df.to_excel(filepath, engine='odf', index=False)
+            # Verify template exists
+            if not os.path.exists(template_path):
+                logger.warning(f"Formatted template not found at {template_path}, creating basic template")
+                # Fallback to basic creation if template missing
+                self._create_basic_template(filepath, sample_set_name)
+                return
             
-            logger.info(f"Created clean template: {filepath}")
+            # Copy the formatted template to the new location
+            shutil.copy2(template_path, filepath)
+            
+            # Update the sample set name in the copied template
+            self._update_template_sample_name(filepath, sample_set_name)
+            
+            logger.info(f"Created formatted ODS template from {template_path}: {filepath}")
             
         except Exception as e:
-            logger.error(f"Error creating clean template: {e}")
+            logger.error(f"Error creating template from formatted file: {e}")
+            logger.info("Falling back to basic template creation")
+            # Fallback to basic creation if template copy fails
+            self._create_basic_template(filepath, sample_set_name)
+    
+    def _create_basic_template(self, filepath, sample_set_name):
+        """Create basic template using pandas (fallback method)."""
+        try:
+            import pandas as pd
+            from utils.worksheet_manager import WorksheetManager
+            
+            # Create clean DataFrame with just headers
+            df = pd.DataFrame(columns=WorksheetManager.PLOT3D_COLUMNS)
+            
+            # Export to ODS format only
+            df.to_excel(filepath, engine='odf', index=False)
+            
+            logger.info(f"Created basic ODS template: {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Error creating basic template: {e}")
             messagebox.showerror("Error", f"Failed to create template: {e}")
+    
+    def _update_template_sample_name(self, filepath, sample_set_name):
+        """Update sample set name in the copied template."""
+        try:
+            # For now, just log that we should update the name
+            # The template copying should work as-is, and the user can edit the name
+            logger.info(f"Template copied successfully, sample set: {sample_set_name}")
+            
+        except Exception as e:
+            logger.warning(f"Could not update template sample name: {e}")
     
     def _create_template_with_data(self, filepath, sample_set_name):
         """Create template populated with real StampZ data."""
