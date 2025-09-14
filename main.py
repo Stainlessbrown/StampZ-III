@@ -8,11 +8,20 @@ This entry point now shows a launch selector dialog allowing users to choose bet
 """
 
 # Import initialize_env first to set up data preservation system
+# Handle module loading for both development and bundled PyInstaller environments
+import sys
+import os
+
+# For bundled PyInstaller apps, ensure current directory is in Python path
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # Running in a PyInstaller bundle
+    if '.' not in sys.path:
+        sys.path.insert(0, '.')
+
 import initialize_env
 
 import tkinter as tk
 import logging
-import sys
 
 logger = logging.getLogger(__name__)
 

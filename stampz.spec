@@ -94,6 +94,8 @@ hiddenimports += [
     'tkinter.messagebox',
     'tkinter.simpledialog',
     'tkinter.ttk',
+    'tkinter.colorchooser',
+    'tkinter.commondialog',
     '_tkinter',
     'numpy',
     'colorspacious',
@@ -149,8 +151,11 @@ if os.path.exists('data/templates'):
 if os.path.exists('plot3d/zoom_presets.json'):
     datas += [('plot3d/zoom_presets.json', 'plot3d')]
 
+# Explicitly add critical modules that PyInstaller might miss
+hiddenimports += ['initialize_env', 'launch_selector']
+
 a = Analysis(
-    ['main.py'],
+    ['main.py', 'initialize_env.py', 'launch_selector.py'],  # Explicitly include these modules
     pathex=[],
     binaries=binaries,
     datas=datas,
