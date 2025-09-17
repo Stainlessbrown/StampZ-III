@@ -877,7 +877,10 @@ class ColorAnalysisDB:
                 cursor = conn.execute(query, values)
                 updated_rows = cursor.rowcount
                 
+                # CRITICAL FIX: Explicitly commit the transaction
+                conn.commit()
                 print(f"    📋 DB UPDATE: Updated {updated_rows} rows for {image_name} pt{coordinate_point}")
+                print(f"    ✅ DB COMMIT: Changes committed to database")
                 
                 if updated_rows > 0:
                     logger.debug(f"Updated Plot_3D values for {image_name} point {coordinate_point}: {len(update_parts)} fields")
