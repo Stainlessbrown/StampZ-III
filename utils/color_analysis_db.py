@@ -6,6 +6,7 @@ Each sample set gets its own database file for perfect data separation.
 
 import sqlite3
 import os
+import sys
 import re
 import logging
 from typing import List, Optional
@@ -36,15 +37,25 @@ class ColorAnalysisDB:
             color_data_dir = os.path.join(stampz_data_dir, "data", "color_analysis")
             print(f"DEBUG: Using persistent color analysis directory: {color_data_dir}")
         else:
-            # Running from source - use relative path
-            current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            color_data_dir = os.path.join(current_dir, "data", "color_analysis")
-            print(f"DEBUG: Using development color analysis directory: {color_data_dir}")
+            # Check if we're running in a PyInstaller bundle
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                # PyInstaller bundle - use a user data directory
+                import os
+                user_data_dir = os.path.expanduser("~/Library/Application Support/StampZ-III")
+                color_data_dir = os.path.join(user_data_dir, "data", "color_analysis")
+                print(f"DEBUG: Using bundled app color analysis directory: {color_data_dir}")
+            else:
+                # Running from source - use relative path
+                current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                color_data_dir = os.path.join(current_dir, "data", "color_analysis")
+                print(f"DEBUG: Using development color analysis directory: {color_data_dir}")
         
         os.makedirs(color_data_dir, exist_ok=True)
         
         self.db_path = os.path.join(color_data_dir, f"{clean_name}.db")
         print(f"DEBUG: Color analysis database path: {self.db_path}")
+        print(f"DEBUG: Database file exists: {os.path.exists(self.db_path)}")
+        print(f"DEBUG: Database directory writable: {os.access(color_data_dir, os.W_OK)}")
         self._init_db()
     
     def _clean_filename(self, name: str) -> str:
@@ -853,6 +864,16 @@ class ColorAnalysisDB:
                 print(f"    💾 DB UPDATE: Executing query for {image_name} pt{coordinate_point}")
                 print(f"    Query: {query}")
                 print(f"    Values: {values}")
+                print(f"    Database path: {self.db_path}")
+                
+                # First, let's see if the measurement exists at all
+                check_cursor = conn.execute("""
+                    SELECT COUNT(*) FROM color_measurements 
+                    WHERE set_id = (SELECT set_id FROM measurement_sets WHERE image_name = ?) 
+                    AND coordinate_point = ?
+                """, (image_name, coordinate_point))
+                existing_count = check_cursor.fetchone()[0]
+                print(f"    🔍 DB CHECK: Found {existing_count} existing measurements for {image_name} pt{coordinate_point}")
                 
                 cursor = conn.execute(query, values)
                 updated_rows = cursor.rowcount
@@ -891,9 +912,15 @@ class ColorAnalysisDB:
             if stampz_data_dir:
                 data_dir = os.path.join(stampz_data_dir, "data", "color_analysis")
             else:
-                # Running from source - use relative path
-                current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                data_dir = os.path.join(current_dir, "data", "color_analysis")
+                # Check if we're running in a PyInstaller bundle
+                if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                    # PyInstaller bundle - use a user data directory
+                    user_data_dir = os.path.expanduser("~/Library/Application Support/StampZ-III")
+                    data_dir = os.path.join(user_data_dir, "data", "color_analysis")
+                else:
+                    # Running from source - use relative path
+                    current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    data_dir = os.path.join(current_dir, "data", "color_analysis")
         
         if not os.path.exists(data_dir):
             return []
