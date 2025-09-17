@@ -693,10 +693,10 @@ class PreferencesDialog:
         info_frame.pack(fill=tk.X)
         
         info_text = (
-            "Your data has been successfully migrated from the old StampZ directory to StampZ_II.\n\n"
-            "• All your color libraries, analysis data, and templates are now in StampZ_II\n"
+            "Your data has been successfully migrated from the old StampZ directory to StampZ-III.\n\n"
+            "• All your color libraries, analysis data, and templates are now in StampZ-III\n"
             "• The old StampZ directory has been left unchanged as a backup\n"
-            "• StampZ_II now uses the migrated data exclusively\n\n"
+            "• StampZ-III now uses the migrated data exclusively\n\n"
             "You can safely delete the old StampZ directory if you no longer need it, "
             "but it's recommended to keep it as a backup until you're sure everything works correctly."
         )
@@ -717,7 +717,7 @@ class PreferencesDialog:
         
         ttk.Label(
             warning_frame,
-            text="⚠️ StampZ data found that can be migrated to StampZ_II",
+            text="⚠️ StampZ data found that can be migrated to StampZ-III",
             font=("TkDefaultFont", 11, "bold"),
             foreground="orange"
         ).pack(anchor=tk.W, pady=(0, 10))
@@ -775,7 +775,7 @@ class PreferencesDialog:
         
         ttk.Button(
             button_frame,
-            text="Migrate Data to StampZ_II",
+            text="Migrate Data to StampZ-III",
             command=lambda: self._perform_migration(migration),
             style="Accent.TButton"
         ).pack(side=tk.LEFT, padx=(0, 10))
@@ -792,8 +792,8 @@ class PreferencesDialog:
         
         info_text = (
             "1. Your old StampZ directory will be backed up (if selected)\n"
-            "2. Data will be copied to the new StampZ_II directory structure\n"
-            "3. StampZ_II will use the migrated data going forward\n"
+            "2. Data will be copied to the new StampZ-III directory structure\n"
+            "3. StampZ-III will use the migrated data going forward\n"
             "4. Your original StampZ directory remains unchanged\n\n"
             "This process is safe and reversible - your original data is never deleted."
         )
@@ -810,7 +810,7 @@ class PreferencesDialog:
         # Confirm with user
         result = messagebox.askyesno(
             "Confirm Migration",
-            "This will migrate your StampZ data to StampZ_II.\n\n"
+            "This will migrate your StampZ data to StampZ-III.\n\n"
             "Your original StampZ directory will be preserved.\n\n"
             "Continue with migration?"
         )
@@ -831,7 +831,7 @@ class PreferencesDialog:
         y = (progress_dialog.winfo_screenheight() // 2) - (progress_dialog.winfo_height() // 2)
         progress_dialog.geometry(f"+{x}+{y}")
         
-        progress_label = ttk.Label(progress_dialog, text="Migrating your data to StampZ_II...\nPlease wait...")
+        progress_label = ttk.Label(progress_dialog, text="Migrating your data to StampZ-III...\nPlease wait...")
         progress_label.pack(expand=True)
         
         progress_dialog.update()
@@ -860,7 +860,7 @@ class PreferencesDialog:
             "Skip Migration",
             "Are you sure you want to skip migrating your StampZ data?\n\n"
             "You can always migrate later from this preferences dialog.\n\n"
-            "StampZ_II will start with empty libraries and no previous data."
+            "If you skip migration, StampZ-III will start with empty libraries and no previous data."
         )
         
         if result:
@@ -877,8 +877,8 @@ class PreferencesDialog:
         messagebox.showinfo(
             "Restart Recommended",
             "Migration completed successfully!\n\n"
-            "Please restart StampZ_II to see the updated migration status.\n\n"
-            "Your migrated data is now available in StampZ_II."
+            "Please restart StampZ-III to see the updated migration status.\n\n"
+            "Your migrated data is now available in StampZ-III."
         )
     
     def _clear_remembered_directories(self):
