@@ -49,17 +49,31 @@ class CoordinateDB:
         if CoordinateDB._initialized:
             return
         
-        # Use user-selected folder for coordinate templates (much more accessible!)
+        # Use proper data directory consistent with the rest of the app
         import sys
-        if hasattr(sys, '_MEIPASS'):
-            # For packaged app, get user-selected templates folder
-            self.db_path = self._get_user_templates_folder()
-            print(f"DEBUG: Using user-selected templates folder: {self.db_path}")
+        
+        # Check if STAMPZ_DATA_DIR is set (bundled app sets this)
+        stampz_data_dir = os.environ.get('STAMPZ_DATA_DIR')
+        
+        if stampz_data_dir:
+            # Use the standardized data directory (Application Support for bundled app)
+            self.db_path = os.path.join(stampz_data_dir, "data", "coordinates.db")
+            print(f"DEBUG: Using STAMPZ_DATA_DIR coordinate database path: {self.db_path}")
+        elif hasattr(sys, '_MEIPASS'):
+            # Fallback for packaged app if STAMPZ_DATA_DIR not set
+            if sys.platform == 'darwin':
+                app_support = os.path.expanduser('~/Library/Application Support/StampZ-III')
+            elif sys.platform.startswith('win'):
+                app_support = os.path.expanduser('~/AppData/Local/StampZ-III')
+            else:
+                app_support = os.path.expanduser('~/.local/share/StampZ-III')
+            self.db_path = os.path.join(app_support, "data", "coordinates.db")
+            print(f"DEBUG: Using fallback Application Support coordinate database path: {self.db_path}")
         else:
             # Development mode - use project data folder
             current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             self.db_path = os.path.join(current_dir, "data", "coordinates.db")
-            print(f"DEBUG: Using development database path: {self.db_path}")
+            print(f"DEBUG: Using development coordinate database path: {self.db_path}")
         
         self._init_db()
         self.cleanup_temporary_data()  # Clean any leftover temporary data on startup
