@@ -39,7 +39,7 @@ class ColorAnalysisDB:
         else:
             # Check if we're running in a PyInstaller bundle
             if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-                # PyInstaller bundle - use a user data directory
+                # PyInstaller bundle - use the same directory as the main app (StampZ-III)
                 user_data_dir = os.path.expanduser("~/Library/Application Support/StampZ-III")
                 color_data_dir = os.path.join(user_data_dir, "data", "color_analysis")
                 print(f"DEBUG: Using bundled app color analysis directory: {color_data_dir}")
@@ -913,7 +913,7 @@ class ColorAnalysisDB:
             else:
                 # Check if we're running in a PyInstaller bundle
                 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-                    # PyInstaller bundle - use a user data directory
+                    # PyInstaller bundle - use the same directory as the main app (StampZ-III)
                     user_data_dir = os.path.expanduser("~/Library/Application Support/StampZ-III")
                     data_dir = os.path.join(user_data_dir, "data", "color_analysis")
                 else:
