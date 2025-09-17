@@ -216,8 +216,15 @@ class RealtimePlot3DSheet:
         except Exception as format_error:
             logger.warning(f"Error applying initial formatting: {format_error}")
         
-        # Bind data change events
+        # Bind data change events - multiple events to catch all changes
         self.sheet.bind("<<SheetModified>>", self._on_data_changed)
+        # Also bind to selection events to catch dropdown changes
+        self.sheet.bind("<<CellSelected>>", self._on_cell_selected)
+        self.sheet.bind("<<SelectionChanged>>", self._on_selection_changed)
+        
+        # Add keyboard shortcut for manual testing (Cmd+S or Ctrl+S)
+        self.sheet.bind('<Control-s>', lambda e: self._debug_manual_save())
+        self.sheet.bind('<Command-s>', lambda e: self._debug_manual_save())
         
     def _apply_formatting(self):
         """Apply visual formatting to cells."""
@@ -417,7 +424,8 @@ class RealtimePlot3DSheet:
         self.save_btn = ttk.Button(toolbar, text="Save to File", command=self._save_to_file)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         
-        self.save_changes_btn = ttk.Button(toolbar, text="Save Changes to DB", command=self._save_changes)
+        # More prominent save button for database changes
+        self.save_changes_btn = ttk.Button(toolbar, text="💾 Save Changes to DB", command=self._save_changes)
         self.save_changes_btn.pack(side=tk.LEFT, padx=5)
         
         self.plot3d_btn = ttk.Button(toolbar, text="Open in Plot_3D", command=self._open_in_plot3d)
@@ -724,12 +732,42 @@ class RealtimePlot3DSheet:
         """Handle data changes in the spreadsheet."""
         print(f"\n📝 DATA CHANGED EVENT TRIGGERED!")
         print(f"  Event: {event}")
-        print(f"  Auto-save will trigger in 1 second...")
+        self._schedule_auto_save("SheetModified")
+    
+    def _on_cell_selected(self, event):
+        """Handle cell selection events - may indicate dropdown changes."""
+        # Check if this might be a dropdown change by looking at the current cell
+        try:
+            current_selection = self.sheet.get_currently_selected()
+            if current_selection:
+                row, col = current_selection[0], current_selection[1] if len(current_selection) > 1 else 0
+                # Check if this is a marker, color, or sphere column that might have changed
+                if col in [6, 7, 11]:  # Marker, Color, Sphere columns
+                    print(f"\n📝 CELL SELECTED IN DROPDOWN COLUMN (row {row}, col {col})")
+                    self._schedule_auto_save("CellSelected")
+        except Exception as e:
+            print(f"DEBUG: Cell selection handler error: {e}")
+    
+    def _on_selection_changed(self, event):
+        """Handle selection change events - backup to catch dropdown changes."""
+        print(f"\n📝 SELECTION CHANGED EVENT TRIGGERED")
+        self._schedule_auto_save("SelectionChanged")
+    
+    def _schedule_auto_save(self, trigger_source):
+        """Schedule auto-save with improved logic."""
+        print(f"  Auto-save scheduled from {trigger_source} - will trigger in 2 seconds...")
         
-        # Auto-save to both file and database
-        if self.refresh_job:
+        # Cancel any existing auto-save job
+        if hasattr(self, 'refresh_job') and self.refresh_job:
             self.window.after_cancel(self.refresh_job)
-        self.refresh_job = self.window.after(1000, self._auto_save_changes)  # 1 second delay
+        
+        # Schedule new auto-save with longer delay to avoid excessive saves
+        self.refresh_job = self.window.after(2000, self._auto_save_changes)  # 2 second delay
+    
+    def _debug_manual_save(self):
+        """Debug method to manually trigger save via keyboard shortcut."""
+        print(f"\n🕹️ MANUAL SAVE TRIGGERED VIA KEYBOARD SHORTCUT")
+        self._auto_save_changes()
     
     def _auto_save_changes(self):
         """Comprehensive auto-save: saves to both internal database and external file if available."""
@@ -740,30 +778,50 @@ class RealtimePlot3DSheet:
                 print(f"  Updating auto-save status to 'Saving...'")
                 self.auto_save_status.config(text="Auto-save: Saving...", foreground='orange')
                 self.window.update_idletasks()
+                
+                # Also temporarily change the manual save button to indicate auto-save is running
+                if hasattr(self, 'save_changes_btn'):
+                    self.save_changes_btn.config(text="💾 Auto-saving...")
             else:
                 print(f"  No auto_save_status widget found")
             
             # Always save to internal database for persistence
+            print(f"  Calling _save_to_internal_database()...")
             self._save_to_internal_database()
+            print(f"  Database save completed")
             
             # Also save to external file if one exists
             if self.current_file_path:
+                print(f"  Saving to external file: {self.current_file_path}")
                 self._save_data_to_file(self.current_file_path)
                 # Trigger Plot_3D refresh if connected
                 self._notify_plot3d_refresh()
+                print(f"  External file save completed")
             
             # Update status - success
             if hasattr(self, 'auto_save_status'):
                 self.auto_save_status.config(text="Auto-save: Saved ✓", foreground='green')
-                # Reset to "Ready" after 2 seconds
-                self.window.after(2000, lambda: self.auto_save_status.config(text="Auto-save: Ready", foreground='green'))
+                # Reset button text
+                if hasattr(self, 'save_changes_btn'):
+                    self.save_changes_btn.config(text="💾 Save Changes to DB")
+                # Reset to "Ready" after 3 seconds
+                self.window.after(3000, lambda: self.auto_save_status.config(text="Auto-save: Ready", foreground='green'))
+                
+            print(f"  ✅ AUTO-SAVE COMPLETED SUCCESSFULLY")
                 
         except Exception as e:
             logger.error(f"Auto-save error: {e}")
+            print(f"  ❌ AUTO-SAVE ERROR: {e}")
+            import traceback
+            print(f"  Full error trace: {traceback.format_exc()}")
+            
             # Update status - error
             if hasattr(self, 'auto_save_status'):
                 self.auto_save_status.config(text="Auto-save: Error!", foreground='red')
-                self.window.after(3000, lambda: self.auto_save_status.config(text="Auto-save: Ready", foreground='green'))
+                # Reset button text
+                if hasattr(self, 'save_changes_btn'):
+                    self.save_changes_btn.config(text="💾 Save Changes to DB")
+                self.window.after(5000, lambda: self.auto_save_status.config(text="Auto-save: Ready", foreground='green'))
     
     def _auto_save_to_file(self):
         """Legacy auto-save method for backward compatibility."""
