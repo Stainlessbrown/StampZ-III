@@ -475,7 +475,8 @@ class RealtimePlot3DSheet:
         """Load initial data from StampZ database."""
         print(f"\n🎆 INITIAL DATA LOADING FOR {self.sample_set_name}")
         try:
-            self._refresh_from_stampz()
+            # Force complete rebuild for initial load
+            self._refresh_from_stampz(force_complete_rebuild=True)
             print(f"\n✅ Initial data loading completed")
         except Exception as e:
             logger.error(f"Error loading initial data: {e}")
@@ -484,9 +485,14 @@ class RealtimePlot3DSheet:
             print(f"Full traceback: {traceback.format_exc()}")
             messagebox.showwarning("Data Loading", f"Could not load initial data: {e}\n\nCheck terminal for details.")
     
-    def _refresh_from_stampz(self):
-        """Refresh data from StampZ color analysis database."""
-        print(f"\n🔄 REFRESH FROM STAMPZ BUTTON CLICKED - DEBUG TRACE")
+    def _refresh_from_stampz(self, force_complete_rebuild=False):
+        """Refresh data from StampZ color analysis database.
+        
+        Args:
+            force_complete_rebuild: If True, completely rebuilds the sheet (used for initial load)
+                                   If False, intelligently updates existing data (default for manual refresh)
+        """
+        print(f"\n🔄 REFRESH FROM STAMPZ BUTTON CLICKED - DEBUG TRACE (force_rebuild={force_complete_rebuild})")
         try:
             from utils.color_analysis_db import ColorAnalysisDB
             from utils.user_preferences import UserPreferences
@@ -503,10 +509,12 @@ class RealtimePlot3DSheet:
             measurements = db.get_all_measurements()
             logger.info(f"Found {len(measurements) if measurements else 0} measurements for {self.sample_set_name}")
             
-            # COMPLETE REFRESH: Clear and rebuild entire sheet from database
-            try:
+            # SMART REFRESH: Only do complete rebuild if forced (e.g., initial load) or sheet is empty
+            current_rows = self.sheet.get_total_rows()
+            should_rebuild = force_complete_rebuild or current_rows == 0
+            
+            if should_rebuild:
                 print(f"\n🧨 COMPLETE REFRESH - CLEARING ENTIRE SHEET:")
-                current_rows = self.sheet.get_total_rows()
                 print(f"  Current sheet has {current_rows} rows - will do complete rebuild")
                 
                 # Clear ALL rows and start fresh
@@ -530,12 +538,12 @@ class RealtimePlot3DSheet:
                 empty_rows = [[''] * len(self.PLOT3D_COLUMNS)] * min_rows
                 self.sheet.insert_rows(rows=empty_rows, idx=0)
                 print(f"  ✅ Created fresh sheet with {min_rows} rows (7 reserved + {regular_measurements_count} data + 10 buffer)")
-                
-            except Exception as clear_error:
-                logger.error(f"Error during complete refresh: {clear_error}")
-                print(f"  ❌ Complete refresh failed: {clear_error}")
-                return
+            else:
+                print(f"\n🔄 SMART REFRESH - PRESERVING CURRENT SHEET:")
+                print(f"  Current sheet has {current_rows} rows - will update in-place to preserve user changes")
+                print(f"  Only updating coordinate data and DataID from database - preserving Plot_3D preferences")
             
+            # Check if we have measurements to process
             if not measurements:
                 logger.info("No measurements found - spreadsheet is empty")
                 return
@@ -581,7 +589,7 @@ class RealtimePlot3DSheet:
                         print(f"      Sphere: {centroid.get('sphere_color')}, radius: {centroid.get('sphere_radius')}")
                     else:
                         print(f"    ⚠️ CENTROID cluster {cluster_id} out of range [0-5], skipping")
-                        
+                            
                 except Exception as centroid_error:
                     print(f"    ❌ Error processing CENTROID: {centroid_error}")
             
@@ -642,6 +650,8 @@ class RealtimePlot3DSheet:
                     saved_sphere_color = measurement.get('sphere_color', '')
                     saved_sphere_radius = measurement.get('sphere_radius', '')
                     
+                    # Debug output removed - marker_preference and color_preference should now be available
+                    
                     # DEBUG: Show the DataID creation and Plot_3D data restoration for first few measurements
                     if i < 10:  # Only show first 10 to avoid spam
                         logger.info(f"DATAID FIX: Measurement {i+1}: image_name='{image_name}', coord_pt={coordinate_point} → DataID='{data_id}'")
@@ -672,40 +682,103 @@ class RealtimePlot3DSheet:
                     logger.warning(f"Error processing measurement {i}: {row_error}")
                     continue
             
-            # SIMPLIFIED: Insert data into sheet starting at row 7 (display row 8)
+            # DATA INSERTION: Handle both complete rebuild and smart refresh
             if data_rows:
                 try:
-                    print(f"\n📝 INSERTING DATA:")
-                    print(f"  Inserting {len(data_rows)} rows starting at sheet row 7 (display row 8)")
-                    
-                    # Sheet already has proper size from complete refresh above
-                    current_rows = self.sheet.get_total_rows()
-                    print(f"  Sheet has {current_rows} rows ready for data insertion")
-                    
-                    # DEBUG: Check actual data insertion
-                    print(f"  Inserting {len(data_rows)} rows starting at row 7 (display row 8)...")
-                    successful_count = 0
-                    
-                    for i, row in enumerate(data_rows):
-                        row_idx = 7 + i  # Start at row 7 (display as row 8)
-                        try:
-                            self.sheet.set_row_data(row_idx, values=row)
-                            successful_count += 1
+                    if should_rebuild:
+                        # COMPLETE REBUILD: Insert all data fresh
+                        print(f"\n📝 COMPLETE DATA INSERTION:")
+                        print(f"  Inserting {len(data_rows)} rows starting at sheet row 7 (display row 8)")
+                        
+                        # Sheet already has proper size from complete refresh above
+                        current_rows = self.sheet.get_total_rows()
+                        print(f"  Sheet has {current_rows} rows ready for data insertion")
+                        
+                        successful_count = 0
+                        for i, row in enumerate(data_rows):
+                            row_idx = 7 + i  # Start at row 7 (display as row 8)
+                            try:
+                                self.sheet.set_row_data(row_idx, values=row)
+                                successful_count += 1
+                                
+                                # Show every 5th row plus first and last few
+                                if i < 3 or i >= len(data_rows) - 3 or i % 5 == 0:
+                                    print(f"    Row {row_idx} (display {row_idx+1}): DataID={row[3]} [{i+1}/{len(data_rows)}]")
+                            except Exception as e:
+                                logger.warning(f"Error setting row {row_idx}: {e}")
+                                print(f"    FAILED Row {row_idx}: {e}")
+                        
+                        print(f"  Successfully inserted {successful_count}/{len(data_rows)} rows")
+                        logger.info(f"Complete data insertion: {successful_count}/{len(data_rows)} rows")
+                        
+                    else:
+                        # SMART REFRESH: Only update coordinate data and DataID, preserve user changes
+                        print(f"\n🔄 SMART DATA UPDATE:")
+                        print(f"  Updating coordinate data for {len(data_rows)} measurements")
+                        print(f"  Preserving user-modified Plot_3D preferences (markers, colors, clusters, etc.)")
+                        
+                        updated_count = 0
+                        preserved_count = 0
+                        
+                        for i, db_row in enumerate(data_rows):
+                            row_idx = 7 + i  # Start at row 7 (display as row 8)
                             
-                            # Show every 5th row plus first and last few
-                            if i < 3 or i >= len(data_rows) - 3 or i % 5 == 0:
-                                print(f"    Row {row_idx} (display {row_idx+1}): DataID={row[3]} [{i+1}/{len(data_rows)}]")
-                        except Exception as e:
-                            logger.warning(f"Error setting row {row_idx}: {e}")
-                            print(f"    FAILED Row {row_idx}: {e}")
+                            try:
+                                # Get current sheet row data
+                                if row_idx < self.sheet.get_total_rows():
+                                    current_row_data = self.sheet.get_row_data(row_idx)
+                                    
+                                    # Create updated row preserving user changes:
+                                    # - Update coordinates (Xnorm, Ynorm, Znorm) and DataID from database
+                                    # - Preserve Plot_3D preferences (Marker, Color, Cluster, ΔE, etc.) from current sheet
+                                    updated_row = [
+                                        db_row[0],  # Xnorm - from database (normalized coordinates)
+                                        db_row[1],  # Ynorm - from database
+                                        db_row[2],  # Znorm - from database
+                                        db_row[3],  # DataID - from database (standardized format)
+                                        current_row_data[4] if len(current_row_data) > 4 else '',  # Cluster - preserve current
+                                        current_row_data[5] if len(current_row_data) > 5 else '',  # ΔE - preserve current
+                                        current_row_data[6] if len(current_row_data) > 6 else '.',  # Marker - preserve current
+                                        current_row_data[7] if len(current_row_data) > 7 else 'blue',  # Color - preserve current
+                                        current_row_data[8] if len(current_row_data) > 8 else '',  # Centroid_X - preserve current
+                                        current_row_data[9] if len(current_row_data) > 9 else '',  # Centroid_Y - preserve current
+                                        current_row_data[10] if len(current_row_data) > 10 else '',  # Centroid_Z - preserve current
+                                        current_row_data[11] if len(current_row_data) > 11 else '',  # Sphere - preserve current
+                                        current_row_data[12] if len(current_row_data) > 12 else ''   # Radius - preserve current
+                                    ]
+                                    
+                                    # Update the row
+                                    self.sheet.set_row_data(row_idx, values=updated_row)
+                                    updated_count += 1
+                                    
+                                    # Debug output for first few rows
+                                    if i < 5:
+                                        print(f"    Row {row_idx}: Updated coordinates, preserved preferences")
+                                        print(f"      Coords: ({db_row[0]:.4f}, {db_row[1]:.4f}, {db_row[2]:.4f})")
+                                        print(f"      Preserved: Marker='{updated_row[6]}', Color='{updated_row[7]}'")
+                                    
+                                    preserved_count += 1
+                                    
+                                else:
+                                    # Row doesn't exist yet - add it (this handles new measurements)
+                                    self.sheet.set_row_data(row_idx, values=db_row)
+                                    updated_count += 1
+                                    if i < 5:
+                                        print(f"    Row {row_idx}: Added new measurement DataID={db_row[3]}")
+                                
+                            except Exception as e:
+                                logger.warning(f"Error updating row {row_idx}: {e}")
+                                print(f"    FAILED Row {row_idx}: {e}")
+                        
+                        print(f"  Successfully updated {updated_count} rows")
+                        print(f"  Preserved user preferences in {preserved_count} rows")
+                        logger.info(f"Smart data update: {updated_count} rows updated, {preserved_count} preferences preserved")
                     
-                    print(f"  Successfully inserted {successful_count}/{len(data_rows)} rows")
-                    print(f"  ✅ Data insertion completed - {len(data_rows)} rows")
-                    logger.info(f"Data insertion successful - {len(data_rows)} rows starting at display row 8")
+                    print(f"  ✅ Data processing completed")
                     
                 except Exception as insert_error:
-                    logger.error(f"Error inserting rows: {insert_error}")
-                    print(f"  ❌ Data insertion failed: {insert_error}")
+                    logger.error(f"Error processing data: {insert_error}")
+                    print(f"  ❌ Data processing failed: {insert_error}")
             
             # Reapply formatting after data changes (with error handling)
             try:
@@ -720,7 +793,7 @@ class RealtimePlot3DSheet:
             # Auto-sync to file if one is loaded
             if self.current_file_path and self.auto_refresh_enabled:
                 self._auto_save_to_file()
-                
+            
         except Exception as e:
             logger.error(f"Error refreshing from StampZ: {e}")
             print(f"\n❌ REFRESH ERROR: {e}")
@@ -2530,7 +2603,7 @@ class RealtimePlot3DSheet:
             
             if new_count > current_rows:
                 logger.info(f"New data detected: {new_count} vs {current_rows} rows")
-                self._refresh_from_stampz()
+                self._refresh_from_stampz(force_complete_rebuild=False)  # Preserve user changes during auto-refresh
                 
                 # Auto-save and notify Plot_3D
                 if self.current_file_path:

@@ -340,7 +340,7 @@ class ColorAnalysisDB:
                 has_averaged_columns = all(col in columns for col in ['is_averaged', 'source_samples_count', 'source_sample_ids'])
                 
                 if has_averaged_columns:
-                    # Query with averaged columns (for averaged databases)
+                    # Query with averaged columns (for averaged databases) - INCLUDE Plot_3D columns
                     cursor = conn.execute("""
                         SELECT 
                             m.id, m.set_id, s.image_name, m.measurement_date,
@@ -348,7 +348,10 @@ class ColorAnalysisDB:
                             m.l_value, m.a_value, m.b_value, 
                             m.rgb_r, m.rgb_g, m.rgb_b,
                             m.sample_type, m.sample_size, m.sample_anchor,
-                            m.notes, m.is_averaged, m.source_samples_count, m.source_sample_ids
+                            m.notes, m.is_averaged, m.source_samples_count, m.source_sample_ids,
+                            m.marker_preference, m.color_preference,
+                            m.cluster_id, m.delta_e, m.centroid_x, m.centroid_y, m.centroid_z,
+                            m.sphere_color, m.sphere_radius, m.trendline_valid
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
                         ORDER BY m.id
@@ -376,7 +379,17 @@ class ColorAnalysisDB:
                             'notes': row[16],
                             'is_averaged': bool(row[17]) if row[17] is not None else False,
                             'source_samples_count': row[18],
-                            'source_sample_ids': row[19]
+                            'source_sample_ids': row[19],
+                            'marker_preference': row[20] if len(row) > 20 and row[20] else '.',
+                            'color_preference': row[21] if len(row) > 21 and row[21] else 'blue',
+                            'cluster_id': row[22] if len(row) > 22 and row[22] is not None else None,
+                            'delta_e': row[23] if len(row) > 23 and row[23] is not None else None,
+                            'centroid_x': row[24] if len(row) > 24 and row[24] is not None else None,
+                            'centroid_y': row[25] if len(row) > 25 and row[25] is not None else None,
+                            'centroid_z': row[26] if len(row) > 26 and row[26] is not None else None,
+                            'sphere_color': row[27] if len(row) > 27 and row[27] else '',
+                            'sphere_radius': row[28] if len(row) > 28 and row[28] is not None else None,
+                            'trendline_valid': bool(row[29]) if len(row) > 29 and row[29] is not None else True
                         })
                 else:
                     # Query without averaged columns (for main databases) - include all Plot_3D columns
