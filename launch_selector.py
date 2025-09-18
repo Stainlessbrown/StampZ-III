@@ -145,21 +145,32 @@ class LaunchSelector:
     def _launch_full_app(self):
         """Launch the full StampZ-III application."""
         self.selected_mode = "full"
-        self.root.destroy()
+        self.root.quit()  # Stop the mainloop
         
     def _launch_plot3d_only(self):
         """Launch Plot_3D only mode."""
         self.selected_mode = "plot3d"
-        self.root.destroy()
+        self.root.quit()  # Stop the mainloop
         
     def _on_cancel(self):
         """Handle window closing."""
         self.selected_mode = None
-        self.root.destroy()
+        self.root.quit()  # Stop the mainloop
         
     def show(self):
         """Show the launch selector and return the selected mode."""
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        except:
+            pass  # Ignore errors during mainloop
+        finally:
+            # Ensure proper cleanup
+            try:
+                if self.root and self.root.winfo_exists():
+                    self.root.quit()
+                    self.root.destroy()
+            except:
+                pass
         return self.selected_mode
 
 

@@ -98,6 +98,14 @@ def main():
         selector = LaunchSelector()
         selected_mode = selector.show()
         
+        # Ensure the selector window is completely cleaned up
+        try:
+            if hasattr(selector, 'root'):
+                selector.root.quit()  # Stop the mainloop
+                selector.root.destroy()  # Destroy the window
+        except:
+            pass  # Ignore errors during cleanup
+        
         if selected_mode == "full":
             launch_full_stampz()
             
@@ -115,6 +123,19 @@ def main():
         # Fallback to full application if selector fails
         print("Falling back to full StampZ-III application...")
         launch_full_stampz()
+    
+    finally:
+        # Final cleanup to ensure no lingering Tk instances
+        try:
+            import tkinter as tk
+            # Get the default root and destroy it if it exists
+            root = tk._default_root
+            if root:
+                root.quit()
+                root.destroy()
+                tk._default_root = None
+        except:
+            pass
 
 
 if __name__ == "__main__":
