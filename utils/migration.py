@@ -225,7 +225,40 @@ class StampZMigration:
                 if old_lib_dir.exists():
                     for lib_file in old_lib_dir.glob('*_library.db'):
                         dest_file = new_lib_dir / lib_file.name
-                        if not dest_file.exists():  # Don't overwrite existing files
+                        should_copy = False
+                        
+                        if not dest_file.exists():
+                            # File doesn't exist, copy it
+                            should_copy = True
+                        else:
+                            # File exists, but check if current source has more data
+                            try:
+                                import sqlite3
+                                # Check source library color count
+                                source_count = 0
+                                with sqlite3.connect(lib_file) as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT COUNT(*) FROM library_colors")
+                                    source_count = cursor.fetchone()[0]
+                                
+                                # Check destination library color count
+                                dest_count = 0
+                                with sqlite3.connect(dest_file) as conn:
+                                    cursor = conn.cursor()
+                                    cursor.execute("SELECT COUNT(*) FROM library_colors")
+                                    dest_count = cursor.fetchone()[0]
+                                
+                                # Copy if source has more colors than destination
+                                if source_count > dest_count:
+                                    should_copy = True
+                                    logger.info(f"Replacing {lib_file.name}: source has {source_count} colors vs existing {dest_count}")
+                                    
+                            except Exception as e:
+                                logger.warning(f"Could not compare library sizes for {lib_file.name}: {e}")
+                                # If we can't compare, don't overwrite existing file
+                                should_copy = False
+                        
+                        if should_copy:
                             shutil.copy2(lib_file, dest_file)
                             migrated_files.append(f"Library: {lib_file.stem.replace('_library', '')}")
                             logger.info(f"Migrated library: {lib_file.name}")
