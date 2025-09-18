@@ -110,11 +110,11 @@ class TemplateManager:
         if hasattr(sys, '_MEIPASS'):
             # Running as packaged app - use persistent user directory
             if sys.platform.startswith('linux'):
-                user_data_dir = os.path.expanduser('~/.local/share/StampZ_II')
+                user_data_dir = os.path.expanduser('~/.local/share/StampZ-III')
             elif sys.platform == 'darwin':
-                user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ_II')
+                user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ-III')
             else:
-                user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ_II')
+                user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ-III')
             return os.path.join(user_data_dir, "coordinates.db")
         else:
             # Running in development - use project data directory

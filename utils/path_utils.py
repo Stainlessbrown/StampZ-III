@@ -26,11 +26,11 @@ def get_base_data_dir() -> str:
     if hasattr(sys, '_MEIPASS'):
         # Running in PyInstaller bundle - use user data directory
         if sys.platform.startswith('linux'):
-            user_data_dir = os.path.expanduser('~/.local/share/StampZ_II')
+            user_data_dir = os.path.expanduser('~/.local/share/StampZ-III')
         elif sys.platform == 'darwin':
-            user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ_II')
+            user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ-III')
         else:  # Windows
-            user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ_II')
+            user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ-III')
         return os.path.join(user_data_dir, "data")
     else:
         # Running from source - use relative path

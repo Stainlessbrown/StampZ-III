@@ -44,13 +44,13 @@ class RecentFilesManager:
                 if sys.platform == 'win32':
                     app_data = os.getenv('APPDATA')
                     if app_data:
-                        self.recent_dir = Path(app_data) / 'StampZ_II' / 'recent'
+                        self.recent_dir = Path(app_data) / 'StampZ-III' / 'recent'
                     else:
-                        self.recent_dir = Path.home() / '.stampz_ii' / 'recent'
+                        self.recent_dir = Path.home() / '.stampz_iii' / 'recent'
                 elif sys.platform == 'darwin':
-                    self.recent_dir = Path.home() / 'Library' / 'Application Support' / 'StampZ_II' / 'recent'
+                    self.recent_dir = Path.home() / 'Library' / 'Application Support' / 'StampZ-III' / 'recent'
                 else:  # Linux and others
-                    self.recent_dir = Path.home() / '.stampz_ii' / 'recent'
+                    self.recent_dir = Path.home() / '.stampz_iii' / 'recent'
                 logger.info(f"Using fallback recent directory: {self.recent_dir}")
         
         # Ensure recent directory exists

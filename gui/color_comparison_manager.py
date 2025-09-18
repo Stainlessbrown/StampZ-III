@@ -694,7 +694,7 @@ class ColorComparisonManager(tk.Frame):
             # Try multiple possible database directories
             possible_dirs = [
                 'data/color_analysis',  # Development relative path
-                os.path.join(os.path.expanduser('~/Library/Application Support/StampZ_II'), 'data', 'color_analysis'),  # macOS app support
+                os.path.join(os.path.expanduser('~/Library/Application Support/StampZ-III'), 'data', 'color_analysis'),  # macOS app support
                 os.path.join(os.getenv('STAMPZ_DATA_DIR', ''), 'data', 'color_analysis') if os.getenv('STAMPZ_DATA_DIR') else None
             ]
             
@@ -906,33 +906,13 @@ class ColorComparisonManager(tk.Frame):
         
         directories = []
         
-        # Check if running as PyInstaller bundle
+        # Primary location using unified path utility
+        directories.append(get_color_libraries_dir())
+        
+        # If running from PyInstaller bundle, also check bundled libraries
         if hasattr(sys, '_MEIPASS'):
-            # Running in PyInstaller bundle - use user data directory
-            if sys.platform.startswith('linux'):
-                user_data_dir = os.path.expanduser('~/.local/share/StampZ_II')
-            elif sys.platform == 'darwin':
-                user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ_II')
-            else:
-                user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ_II')
-            directories.append(os.path.join(user_data_dir, "data", "color_libraries"))
-            
-            # Also check bundled libraries
             bundled_dir = os.path.join(sys._MEIPASS, "data", "color_libraries")
             directories.append(bundled_dir)
-        else:
-            # Running from source - use relative path
-            current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            directories.append(os.path.join(current_dir, "data", "color_libraries"))
-            
-            # Also check user data directory in case libraries were added while running from source
-            if sys.platform.startswith('linux'):
-                user_data_dir = os.path.expanduser('~/.local/share/StampZ_II')
-            elif sys.platform == 'darwin':
-                user_data_dir = os.path.expanduser('~/Library/Application Support/StampZ_II')
-            else:
-                user_data_dir = os.path.expanduser('~/AppData/Roaming/StampZ_II')
-            directories.append(os.path.join(user_data_dir, "data", "color_libraries"))
         
         # Note: Backward compatibility with old StampZ directory has been removed.
         # Users should use the migration feature in Preferences to migrate old data.
