@@ -19,8 +19,14 @@ import sys
 class LaunchSelector:
     """Launch mode selector dialog for StampZ-III."""
     
-    def __init__(self):
-        self.root = tk.Tk()
+    def __init__(self, root=None):
+        if root is None:
+            self.root = tk.Tk()
+            self.own_root = True
+        else:
+            self.root = root
+            self.own_root = False
+            
         self.root.title("StampZ-III Launcher")
         self.selected_mode = None
         
@@ -159,16 +165,21 @@ class LaunchSelector:
         
     def show(self):
         """Show the launch selector and return the selected mode."""
+        # Show the window
+        self.root.deiconify()
+        
         try:
             self.root.mainloop()
         except:
             pass  # Ignore errors during mainloop
         finally:
-            # Ensure proper cleanup
+            # Hide the window but don't destroy if we don't own it
             try:
                 if self.root and self.root.winfo_exists():
-                    self.root.quit()
-                    self.root.destroy()
+                    self.root.withdraw()  # Hide instead of destroy
+                    if self.own_root:
+                        self.root.quit()
+                        self.root.destroy()
             except:
                 pass
         return self.selected_mode
