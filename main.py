@@ -108,9 +108,13 @@ def main():
         
         if selected_mode == "full":
             launch_full_stampz()
+            # Force complete process termination when main app closes
+            sys.exit(0)
             
         elif selected_mode == "plot3d":
             launch_plot3d_only()
+            # Force complete process termination when Plot_3D closes
+            sys.exit(0)
             
         else:
             # User cancelled or closed dialog
@@ -123,6 +127,8 @@ def main():
         # Fallback to full application if selector fails
         print("Falling back to full StampZ-III application...")
         launch_full_stampz()
+        # Force complete process termination after fallback
+        sys.exit(0)
     
     finally:
         # Final cleanup to ensure no lingering Tk instances
