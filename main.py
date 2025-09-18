@@ -26,8 +26,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def launch_full_stampz(root):
-    """Launch the full StampZ-III application using existing root."""
+def launch_full_stampz():
+    """Launch the full StampZ-III application."""
     # Import the refactored application
     from app import StampZApp
     
@@ -39,13 +39,16 @@ def launch_full_stampz(root):
     
     logger.info("Starting full StampZ-III application...")
     
+    # Create main window
+    root = tk.Tk()
+    
     try:
-        # Create and run the application using the provided root
+        # Create and run the application
         app = StampZApp(root)
         logger.info("StampZ-III application initialized successfully")
         
-        # The mainloop will continue running in main()
-        return True
+        # Start the main event loop
+        root.mainloop()
         
     except Exception as e:
         logger.error(f"Failed to start StampZ-III: {e}")
@@ -61,18 +64,19 @@ def launch_full_stampz(root):
             )
         except:
             print(f"CRITICAL ERROR: {e}")
-        
-        return False
+    
+    finally:
+        try:
+            root.destroy()
+        except:
+            pass
 
 
-def launch_plot3d_only(root):
-    """Launch Plot_3D only mode using existing root."""
+def launch_plot3d_only():
+    """Launch Plot_3D only mode."""
     try:
         from plot3d.standalone_plot3d import main as plot3d_main
-        # Note: plot3d_main() creates its own window, so we hide the root
-        root.withdraw()
         plot3d_main()
-        return True
     except Exception as e:
         logger.error(f"Failed to start Plot_3D mode: {e}")
         try:
@@ -83,57 +87,53 @@ def launch_plot3d_only(root):
             )
         except:
             print(f"CRITICAL ERROR: {e}")
-        return False
 
 
 def main():
     """Main entry point - shows launch mode selector."""
-    # Create single root window for entire application lifecycle
-    root = tk.Tk()
-    root.withdraw()  # Hide initially
-    
     try:
-        # Show launch selector using the root window
+        # Show launch selector
         from launch_selector import LaunchSelector
         
-        # Create selector with our root instead of creating its own
-        selector = LaunchSelector(root)
+        selector = LaunchSelector()
         selected_mode = selector.show()
         
+        # Ensure the selector window is completely cleaned up
+        try:
+            if hasattr(selector, 'root'):
+                selector.root.quit()  # Stop the mainloop
+                selector.root.destroy()  # Destroy the window
+        except:
+            pass  # Ignore errors during cleanup
+        
         if selected_mode == "full":
-            success = launch_full_stampz(root)
-            if success:
-                # StampZ-III will manage the root window from here
-                root.deiconify()  # Show the window
-                root.mainloop()  # Run the main event loop
+            launch_full_stampz()
             
         elif selected_mode == "plot3d":
-            success = launch_plot3d_only(root)
-            if success:
-                root.mainloop()  # Keep root alive for Plot_3D
+            launch_plot3d_only()
             
         else:
             # User cancelled or closed dialog
             print("Launch cancelled by user")
+            sys.exit(0)
             
     except Exception as e:
         print(f"Error during launch: {e}")
         logging.error(f"Launch selector error: {e}")
         # Fallback to full application if selector fails
         print("Falling back to full StampZ-III application...")
-        try:
-            success = launch_full_stampz(root)
-            if success:
-                root.deiconify()
-                root.mainloop()
-        except Exception as fallback_error:
-            print(f"Fallback also failed: {fallback_error}")
+        launch_full_stampz()
     
     finally:
-        # Clean shutdown
+        # Final cleanup to ensure no lingering Tk instances
         try:
-            root.quit()
-            root.destroy()
+            import tkinter as tk
+            # Get the default root and destroy it if it exists
+            root = tk._default_root
+            if root:
+                root.quit()
+                root.destroy()
+                tk._default_root = None
         except:
             pass
 
