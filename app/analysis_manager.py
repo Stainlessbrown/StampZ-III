@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 from PIL import Image
 import numpy as np
 from pathlib import Path
-import cv2
 
 if TYPE_CHECKING:
     from .stampz_app import StampZApp
@@ -2345,6 +2344,11 @@ class AnalysisManager:
                     
                     # 3. Create and save adaptive mask (the one you mentioned wanting)
                     # This shows the detection method that works well
+                    try:
+                        import cv2
+                    except ImportError:
+                        raise ImportError("OpenCV (cv2) is required for the Black Ink Extractor. Please install it with: pip install opencv-python")
+                    
                     gray = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
                     adaptive_mask = cv2.adaptiveThreshold(
                         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 3
