@@ -30,6 +30,35 @@ class AnalysisManager:
         self.app = app
         self.root = app.root
         
+        # Initialize specialized managers
+        self._init_managers()
+        
+    def _init_managers(self):
+        """Initialize specialized manager classes for better code organization."""
+        try:
+            # Data Export Manager
+            from managers.data_export_manager import DataExportManager
+            self.data_export_manager = DataExportManager(self.app)
+        except ImportError:
+            logger.warning("DataExportManager not available, using legacy methods")
+            self.data_export_manager = None
+            
+        try:
+            # Black Ink Manager
+            from managers.black_ink_manager import BlackInkManager
+            self.black_ink_manager = BlackInkManager(self.app)
+        except ImportError:
+            logger.warning("BlackInkManager not available, using legacy methods")
+            self.black_ink_manager = None
+            
+        try:
+            # Database Manager
+            from managers.database_manager import DatabaseManager
+            self.database_manager = DatabaseManager(self.app, self.root)
+        except ImportError:
+            logger.warning("DatabaseManager not available, using legacy methods")
+            self.database_manager = None
+        
     def analyze_colors(self):
         """Analyze colors from sample markers on the canvas."""
         if not hasattr(self.app.canvas, '_coord_markers') or not self.app.canvas._coord_markers:
@@ -93,32 +122,7 @@ class AnalysisManager:
                 print(f"DEBUG: Number of measurements: {len(measurements)}")
             
             if measurements:
-                dialog = tk.Toplevel(self.root)
-                dialog.title("Analysis Complete")
-                
-                dialog_width = 400
-                dialog_height = 200
-                
-                screen_width = self.root.winfo_screenwidth()
-                screen_height = self.root.winfo_screenheight()
-                
-                x = screen_width - dialog_width - 50
-                y = (screen_height - dialog_height) // 2
-                
-                dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
-                
-                message = f"Successfully analyzed {len(measurements)} color samples from set '{actual_sample_set}'.\\n\\n"
-                message += f"Color data has been saved to the database.\\n\\n"
-                message += f"You can now view the spreadsheet or export the data."
-                
-                ttk.Label(dialog, text=message, wraplength=350, justify="left").pack(padx=20, pady=20)
-                
-                ttk.Button(dialog, text="OK", command=dialog.destroy).pack(pady=10)
-                
-                dialog.transient(self.root)
-                dialog.grab_set()
-                
-                self.root.wait_window(dialog)
+                self._show_analysis_complete_dialog(measurements, actual_sample_set)
             else:
                 messagebox.showwarning(
                     "Analysis Failed", 
@@ -132,8 +136,385 @@ class AnalysisManager:
                 f"Failed to analyze color samples:\\n\\n{str(e)}"
             )
     
+    def _show_analysis_complete_dialog(self, measurements, sample_set_name):
+        """Show simple analysis complete dialog without export options."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Color Analysis Complete")
+        
+        dialog_width = 480
+        dialog_height = 280
+        
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        x = screen_width - dialog_width - 50
+        y = (screen_height - dialog_height) // 2
+        
+        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        
+        # Header
+        header_frame = ttk.Frame(dialog)
+        header_frame.pack(fill="x", padx=20, pady=(20, 10))
+        
+        ttk.Label(
+            header_frame,
+            text="✅ Color Analysis Complete",
+            font=("Arial", 14, "bold")
+        ).pack()
+        
+        # Results summary
+        summary_frame = ttk.Frame(dialog)
+        summary_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        summary_text = (
+            f"Successfully analyzed {len(measurements)} color samples from set '{sample_set_name}'.\n"
+            f"Color data has been saved to the database.\n\n"
+            f"Individual measurements: {len(measurements)} samples\n\n"
+            f"Next steps:\n"
+            f"• Use the Compare tab to review and compare colors\n"
+            f"• Export data using the Compare window's export button\n"
+            f"• View spreadsheet or export for Plot3D analysis"
+        )
+        
+        ttk.Label(
+            summary_frame,
+            text=summary_text,
+            wraplength=440,
+            justify="left",
+            font=("Arial", 10)
+        ).pack()
+        
+        # Action buttons frame
+        action_frame = ttk.Frame(dialog)
+        action_frame.pack(fill="x", padx=20, pady=(0, 15))
+        
+        # View spreadsheet button
+        ttk.Button(
+            action_frame,
+            text="📊 View Spreadsheet",
+            command=lambda: [dialog.destroy(), self.view_spreadsheet()]
+        ).pack(side="left", padx=(0, 10))
+        
+        # Export for Plot3D button
+        ttk.Button(
+            action_frame,
+            text="📈 Export for Plot3D",
+            command=lambda: [dialog.destroy(), self.export_plot3d_flexible()]
+        ).pack(side="left", padx=(0, 10))
+        
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ttk.Button(
+            button_frame,
+            text="Close",
+            command=dialog.destroy
+        ).pack(side="right")
+        
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center on screen
+        dialog.update_idletasks()
+        dialog.focus_force()
+        
+        self.root.wait_window(dialog)
+    
+    def _export_individual_to_logger(self, measurements, sample_set_name, dialog):
+        """Export individual measurements to unified data logger."""
+        try:
+            if not self.app.current_file:
+                messagebox.showerror("Error", "No current image file available.")
+                return
+                
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Get measurements data from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.app.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.app.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.app.current_file)
+            
+            # Log individual measurements
+            log_file = logger.log_individual_color_measurements(
+                db_measurements, sample_set_name, self.app.current_file
+            )
+            
+            if log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"Individual color measurements exported to unified data logger.\n\n"
+                    f"File: {log_file.name}\n"
+                    f"Measurements: {len(db_measurements)} samples"
+                )
+                dialog.destroy()
+            else:
+                messagebox.showerror("Export Failed", "Failed to export individual measurements to data logger.")
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Export Error",
+                f"Failed to export individual measurements:\n\n{str(e)}"
+            )
+    
+    def _export_averaged_to_logger(self, measurements, sample_set_name, dialog):
+        """Export averaged measurement to unified data logger."""
+        try:
+            if not self.app.current_file:
+                messagebox.showerror("Error", "No current image file available.")
+                return
+                
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analyzer import ColorAnalyzer
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Calculate averaged measurement from individual measurements
+            analyzer = ColorAnalyzer()
+            
+            # Get individual measurements from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.app.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.app.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            if not db_measurements:
+                messagebox.showerror("Error", "No measurements found in database.")
+                return
+            
+            # Calculate quality-controlled average
+            lab_values = [(m['l_value'], m['a_value'], m['b_value']) for m in db_measurements]
+            rgb_values = [(m['rgb_r'], m['rgb_g'], m['rgb_b']) for m in db_measurements]
+            
+            averaging_result = analyzer._calculate_quality_controlled_average(lab_values, rgb_values)
+            
+            # Create averaged data dictionary
+            averaged_data = {
+                'l_value': averaging_result['avg_lab'][0],
+                'a_value': averaging_result['avg_lab'][1], 
+                'b_value': averaging_result['avg_lab'][2],
+                'rgb_r': averaging_result['avg_rgb'][0],
+                'rgb_g': averaging_result['avg_rgb'][1],
+                'rgb_b': averaging_result['avg_rgb'][2],
+                'notes': f"ΔE max: {averaging_result['max_delta_e']:.2f}, "
+                        f"used {averaging_result['samples_used']}/{len(db_measurements)} samples"
+            }
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.app.current_file)
+            
+            # Log averaged measurement
+            log_file = logger.log_averaged_color_measurement(
+                averaged_data, sample_set_name, self.app.current_file, len(db_measurements)
+            )
+            
+            if log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"Averaged color measurement exported to unified data logger.\n\n"
+                    f"File: {log_file.name}\n"
+                    f"Averaged from: {len(db_measurements)} individual samples\n"
+                    f"Quality: ΔE max = {averaging_result['max_delta_e']:.2f}"
+                )
+                dialog.destroy()
+            else:
+                messagebox.showerror("Export Failed", "Failed to export averaged measurement to data logger.")
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Export Error",
+                f"Failed to export averaged measurement:\\n\\n{str(e)}"
+            )
+    
+    def _export_both_to_logger(self, measurements, sample_set_name, dialog):
+        """Export both individual and averaged measurements to unified data logger."""
+        try:
+            if not self.app.current_file:
+                messagebox.showerror("Error", "No current image file available.")
+                return
+                
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analyzer import ColorAnalyzer
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Get measurements from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.app.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.app.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            if not db_measurements:
+                messagebox.showerror("Error", "No measurements found in database.")
+                return
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.app.current_file)
+            
+            # First export individual measurements
+            individual_log_file = logger.log_individual_color_measurements(
+                db_measurements, sample_set_name, self.app.current_file
+            )
+            
+            if not individual_log_file:
+                messagebox.showerror("Export Failed", "Failed to export individual measurements to data logger.")
+                return
+            
+            # Calculate and export averaged measurement
+            analyzer = ColorAnalyzer()
+            
+            # Calculate quality-controlled average
+            lab_values = [(m['l_value'], m['a_value'], m['b_value']) for m in db_measurements]
+            rgb_values = [(m['rgb_r'], m['rgb_g'], m['rgb_b']) for m in db_measurements]
+            
+            averaging_result = analyzer._calculate_quality_controlled_average(lab_values, rgb_values)
+            
+            # Create averaged data dictionary
+            averaged_data = {
+                'l_value': averaging_result['avg_lab'][0],
+                'a_value': averaging_result['avg_lab'][1], 
+                'b_value': averaging_result['avg_lab'][2],
+                'rgb_r': averaging_result['avg_rgb'][0],
+                'rgb_g': averaging_result['avg_rgb'][1],
+                'rgb_b': averaging_result['avg_rgb'][2],
+                'notes': f"ΔE max: {averaging_result['max_delta_e']:.2f}, "
+                        f"used {averaging_result['samples_used']}/{len(db_measurements)} samples"
+            }
+            
+            # Export averaged measurement
+            averaged_log_file = logger.log_averaged_color_measurement(
+                averaged_data, sample_set_name, self.app.current_file, len(db_measurements)
+            )
+            
+            if averaged_log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"BOTH individual and averaged measurements exported to unified data logger!\n\n"
+                    f"Sample Set: {sample_set_name}\n"
+                    f"File: {averaged_log_file.name}\n\n"
+                    f"INDIVIDUAL DATA:\n"
+                    f"  • {len(db_measurements)} sample measurements\n"
+                    f"  • Complete L*a*b* and RGB values\n"
+                    f"  • Position and sample details\n\n"
+                    f"AVERAGED DATA:\n"
+                    f"  • Quality-controlled average\n"
+                    f"  • ΔE max = {averaging_result['max_delta_e']:.2f}\n"
+                    f"  • Used {averaging_result['samples_used']}/{len(db_measurements)} samples\n\n"
+                    f"Your comprehensive analysis log now contains both detailed individual \n"
+                    f"measurements AND high-quality averaged data for complete documentation."
+                )
+                dialog.destroy()
+            else:
+                messagebox.showerror("Export Failed", "Failed to export averaged measurement to data logger.")
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Export Error",
+                f"Failed to export both measurements:\\n\\n{str(e)}"
+            )
+    
+    def export_color_data(self):
+        """Export color analysis data - delegate to DataExportManager."""
+        if self.data_export_manager:
+            return self.data_export_manager.export_color_data()
+        else:
+            return self._legacy_export_color_data()
+            
     def create_plot3d_worksheet(self):
         """Create a formatted Excel worksheet for Plot_3D integration."""
+        if self.data_export_manager:
+            return self.data_export_manager.create_plot3d_worksheet()
+        else:
+            return self._legacy_create_plot3d_worksheet()
+            
+    def export_plot3d_flexible(self):
+        """Export data in Plot_3D flexible format."""
+        if self.data_export_manager:
+            return self.data_export_manager.export_plot3d_flexible()
+        else:
+            return self._legacy_export_plot3d_flexible()
+            
+    def export_with_library_matches(self):
+        """Export analysis data with library matches."""
+        if self.data_export_manager:
+            return self.data_export_manager.export_with_library_matches()
+        else:
+            return self._legacy_export_with_library_matches()
+            
+    def open_plot3d_data_manager(self):
+        """Open unified Plot_3D Data Manager."""
+        if self.data_export_manager:
+            # Could delegate specific Plot_3D management to data export manager
+            return self._legacy_open_plot3d_data_manager()
+        else:
+            return self._legacy_open_plot3d_data_manager()
+            
+    # Legacy methods (fallbacks)
+    def _legacy_create_plot3d_worksheet(self):
+        """Legacy implementation of Plot_3D worksheet creation."""
         try:
             from utils.worksheet_manager import WorksheetManager
             
@@ -909,106 +1290,10 @@ class AnalysisManager:
             sample_set_name: Name for the new database
             import_result: ImportResult with data to save
         """
-        try:
-            from utils.color_analysis_db import ColorAnalysisDB
-            
-            print(f"DEBUG: Creating database: {sample_set_name}")
-            db = ColorAnalysisDB(sample_set_name)
-            
-            saved_count = 0
-            
-            # Save centroid data first
-            if import_result.centroid_data:
-                print(f"DEBUG: Saving {len(import_result.centroid_data)} centroids")
-                for cluster_id, centroid_row in import_result.centroid_data:
-                    try:
-                        # Extract centroid info from the row
-                        centroid_x = float(centroid_row[8]) if centroid_row[8] and str(centroid_row[8]).strip() else None
-                        centroid_y = float(centroid_row[9]) if centroid_row[9] and str(centroid_row[9]).strip() else None
-                        centroid_z = float(centroid_row[10]) if centroid_row[10] and str(centroid_row[10]).strip() else None
-                        sphere_color = centroid_row[11] if centroid_row[11] and str(centroid_row[11]).strip() else None
-                        sphere_radius = float(centroid_row[12]) if centroid_row[12] and str(centroid_row[12]).strip() else None
-                        
-                        if centroid_x is not None and centroid_y is not None and centroid_z is not None:
-                            success = db.insert_or_update_centroid_data(
-                                cluster_id=cluster_id,
-                                centroid_x=centroid_x,
-                                centroid_y=centroid_y,
-                                centroid_z=centroid_z,
-                                sphere_color=sphere_color,
-                                sphere_radius=sphere_radius,
-                                marker='.',
-                                color='blue'
-                            )
-                            if success:
-                                saved_count += 1
-                                print(f"DEBUG: Saved centroid {cluster_id}: ({centroid_x}, {centroid_y}, {centroid_z})")
-                    except Exception as centroid_error:
-                        print(f"DEBUG: Error saving centroid {cluster_id}: {centroid_error}")
-            
-            # Save regular data
-            if import_result.data:
-                print(f"DEBUG: Saving {len(import_result.data)} data rows")
-                for i, row in enumerate(import_result.data):
-                    try:
-                        # Extract data from row
-                        x_norm = float(row[0]) if row[0] and str(row[0]).strip() else 0.0
-                        y_norm = float(row[1]) if row[1] and str(row[1]).strip() else 0.0
-                        z_norm = float(row[2]) if row[2] and str(row[2]).strip() else 0.0
-                        data_id = str(row[3]) if row[3] else f"Data_{i+1:03d}"
-                        cluster = int(row[4]) if row[4] and str(row[4]).strip() else None
-                        delta_e = float(row[5]) if row[5] and str(row[5]).strip() else None
-                        marker = str(row[6]) if row[6] else '.'
-                        color = str(row[7]) if row[7] else 'blue'
-                        
-                        # Parse DataID for database format
-                        if '_pt' in data_id:
-                            parts = data_id.split('_pt')
-                            image_name = parts[0]
-                            coord_point = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
-                        else:
-                            image_name = data_id
-                            coord_point = 1
-                        
-                        # Insert as new measurement
-                        success = db.insert_new_measurement(
-                            image_name=image_name,
-                            coordinate_point=coord_point,
-                            x_pos=0.0,  # Position not relevant for imported data
-                            y_pos=0.0,
-                            l_value=x_norm,  # Store normalized values as L*a*b*
-                            a_value=y_norm,
-                            b_value=z_norm,
-                            rgb_r=0.0, rgb_g=0.0, rgb_b=0.0,
-                            cluster_id=cluster,
-                            delta_e=delta_e,
-                            centroid_x=float(row[8]) if row[8] and str(row[8]).strip() else None,
-                            centroid_y=float(row[9]) if row[9] and str(row[9]).strip() else None,
-                            centroid_z=float(row[10]) if row[10] and str(row[10]).strip() else None,
-                            sphere_color=str(row[11]) if row[11] and str(row[11]).strip() else None,
-                            sphere_radius=float(row[12]) if row[12] and str(row[12]).strip() else None,
-                            marker=marker,
-                            color=color,
-                            sample_type='imported_data',
-                            notes=f'Imported from external file'
-                        )
-                        
-                        if success:
-                            saved_count += 1
-                            if i % 50 == 0:  # Progress indicator
-                                print(f"DEBUG: Saved {i+1} data rows so far...")
-                    
-                    except Exception as row_error:
-                        print(f"DEBUG: Error saving data row {i}: {row_error}")
-                        continue
-            
-            print(f"DEBUG: Database save completed - {saved_count} total records saved")
-            return saved_count
-            
-        except Exception as e:
-            print(f"DEBUG: Error saving to database: {e}")
-            logger.error(f"Error saving imported data to database: {e}")
-            raise
+        if self.database_manager:
+            return self.database_manager.save_imported_data_to_database(sample_set_name, import_result)
+        else:
+            return self._legacy_save_imported_data_to_database(sample_set_name, import_result)
     
     def _create_new_plot3d_template(self):
         """Create a new empty Plot_3D template."""
@@ -1023,22 +1308,10 @@ class AnalysisManager:
     
     def _open_internal_viewer(self, sample_set_name):
         """Open real-time spreadsheet viewer for specific sample set."""
-        try:
-            from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
-            
-            # Use the new real-time Excel-like spreadsheet
-            spreadsheet = RealtimePlot3DSheet(
-                parent=self.root,
-                sample_set_name=sample_set_name
-            )
-            
-            logger.info(f"Opened real-time spreadsheet for: {sample_set_name}")
-            
-        except Exception as e:
-            messagebox.showerror(
-                "Error",
-                f"Failed to open real-time viewer:\\n\\n{str(e)}"
-            )
+        if self.database_manager:
+            return self.database_manager.open_internal_viewer(sample_set_name)
+        else:
+            return self._legacy_open_internal_viewer(sample_set_name)
     
     def _create_file_from_existing(self, sample_set_name):
         """Create file template from existing StampZ data."""
@@ -1046,25 +1319,10 @@ class AnalysisManager:
     
     def create_plot3d_worksheet_with_name(self, sample_set_name, populate=True):
         """Create Plot_3D worksheet with specified sample set name."""
-        # This is the refactored version of the original create_plot3d_worksheet method
-        # but using the provided sample_set_name instead of guessing
-        
-        # Get save location
-        default_filename = f"{sample_set_name}_Plot3D_{datetime.now().strftime('%Y%m%d')}"
-        
-        filepath = filedialog.asksaveasfilename(
-            title="Create Plot_3D Worksheet",
-            defaultextension=".ods",
-            filetypes=[
-                ('OpenDocument Spreadsheet', '*.ods')
-            ],
-            initialfile=default_filename,
-            initialdir=os.path.expanduser("~/Desktop")
-        )
-        
-        if filepath:
-            # Rest of the creation logic...
-            self._execute_worksheet_creation(filepath, sample_set_name, populate)
+        if self.database_manager:
+            return self.database_manager.create_plot3d_worksheet_with_name(sample_set_name, populate)
+        else:
+            return self._legacy_create_plot3d_worksheet_with_name(sample_set_name, populate)
     
     def _execute_worksheet_creation(self, filepath, sample_set_name, populate):
         """Execute the actual worksheet creation logic (ODS format only)."""
@@ -1144,10 +1402,10 @@ class AnalysisManager:
     
     def _create_and_launch_from_database(self, sample_set_name):
         """Create template from database and launch Plot_3D."""
-        filepath = self._get_save_path(sample_set_name)
-        if filepath:
-            self._create_template_with_data(filepath, sample_set_name)
-            self._launch_plot3d_with_file(filepath)
+        if self.database_manager:
+            return self.database_manager.create_and_launch_from_database(sample_set_name)
+        else:
+            return self._legacy_create_and_launch_from_database(sample_set_name)
     
     def _load_existing_file_in_plot3d(self):
         """Load existing Plot_3D file directly."""
@@ -1440,121 +1698,16 @@ class AnalysisManager:
         dialog.focus_force()
         dialog.lift()
     
-    def export_plot3d_flexible(self):
-        """Export current data to Plot_3D format with flexible format options."""
-        try:
-            # Get current sample set name
-            sample_set_name = "StampZ_Analysis"  # Default
-            if (hasattr(self.app, 'control_panel') and 
-                hasattr(self.app.control_panel, 'sample_set_name') and 
-                self.app.control_panel.sample_set_name.get().strip()):
-                sample_set_name = self.app.control_panel.sample_set_name.get().strip()
-            
-            # Check if we have data
-            try:
-                from utils.color_analysis_db import ColorAnalysisDB
-                db = ColorAnalysisDB(sample_set_name)
-                measurements = db.get_all_measurements()
-                
-                if not measurements:
-                    messagebox.showinfo(
-                        "No Data",
-                        f"No color analysis data found for sample set '{sample_set_name}'.\\n\\n"
-                        "Please run color analysis first."
-                    )
-                    return
-            except Exception as e:
-                messagebox.showerror(
-                    "Database Error",
-                    f"Error accessing color analysis data:\\n\\n{str(e)}"
-                )
-                return
-            
-            # Get export format and location
-            default_filename = f"{sample_set_name}_Plot3D_{datetime.now().strftime('%Y%m%d')}"
-            
-            filepath = filedialog.asksaveasfilename(
-                title="Export Plot_3D Data",
-                filetypes=[
-                    ('Excel Workbook', '*.xlsx'),
-                    ('OpenDocument Spreadsheet', '*.ods'), 
-                    ('CSV files', '*.csv'),
-                    ('All files', '*.*')
-                ],
-                initialfile=default_filename
-            )
-            
-            if filepath:
-                # Determine format from extension
-                file_ext = os.path.splitext(filepath)[1].lower()
-                format_map = {'.xlsx': 'xlsx', '.ods': 'ods', '.csv': 'csv'}
-                export_format = format_map.get(file_ext, 'xlsx')
-                
-                from utils.worksheet_manager import WorksheetManager
-                
-                # Create worksheet with data
-                manager = WorksheetManager()
-                
-                if export_format == 'xlsx':
-                    # For Excel, create formatted worksheet
-                    success = manager.create_plot3d_worksheet(filepath, sample_set_name)
-                    if success:
-                        manager.load_stampz_data(sample_set_name)
-                        manager.save_worksheet(filepath)
-                else:
-                    # For ODS/CSV, create temporary Excel then export
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
-                        temp_path = tmp_file.name
-                    
-                    success = manager.create_plot3d_worksheet(temp_path, sample_set_name)
-                    if success:
-                        manager.load_stampz_data(sample_set_name)
-                        success = manager.export_to_format(filepath, export_format)
-                    
-                    # Clean up temp file
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-                
-                if success:
-                    messagebox.showinfo(
-                        "Export Successful",
-                        f"Plot_3D data exported successfully.\\n\\n"
-                        f"File: {os.path.basename(filepath)}\\n"
-                        f"Format: {export_format.upper()}\\n"
-                        f"Data: {len(measurements)} measurements from '{sample_set_name}'\\n\\n"
-                        f"{'Formatted with validation (Excel only)' if export_format == 'xlsx' else 'Plain data format'}"
-                    )
-                else:
-                    messagebox.showerror(
-                        "Export Failed",
-                        f"Failed to export Plot_3D data to {export_format.upper()} format."
-                    )
-                    
-        except ImportError as e:
-            if 'openpyxl' in str(e):
-                messagebox.showerror(
-                    "Missing Dependency",
-                    "The Plot_3D export feature requires 'openpyxl'.\\n\\n"
-                    "Please install it using: pip install openpyxl"
-                )
-            elif 'odfpy' in str(e):
-                messagebox.showerror(
-                    "Missing Dependency",
-                    "ODS export requires 'odfpy'.\\n\\n"
-                    "Please install it using: pip install odfpy"
-                )
-            else:
-                messagebox.showerror(
-                    "Import Error",
-                    f"Missing required dependency:\\n\\n{str(e)}"
-                )
-        except Exception as e:
+    def _legacy_export_plot3d_flexible(self):
+        """Legacy implementation of flexible Plot3D export."""
+        if self.database_manager:
+            return self.database_manager.export_plot3d_flexible()
+        else:
+            # Fallback implementation
             messagebox.showerror(
-                "Export Error",
-                f"Failed to export Plot_3D data:\\n\\n{str(e)}"
+                "Feature Unavailable",
+                "Plot3D export functionality is not available.\n\n"
+                "DatabaseManager component is missing."
             )
 
     def export_color_data(self):
@@ -1933,76 +2086,17 @@ class AnalysisManager:
 
     def _export_data_for_plot3d(self, sample_set_name, measurements):
         """Export data specifically formatted for Plot3D analysis."""
-        try:
-            from utils.direct_plot3d_exporter import DirectPlot3DExporter
-            
-            exporter = DirectPlot3DExporter()
-            created_files = exporter.export_to_plot3d(sample_set_name)
-            
-            if created_files:
-                # Show success message with all created files
-                files_list = "\\n".join([f"  - {os.path.basename(f)}" for f in created_files])
-                messagebox.showinfo(
-                    "Export Complete",
-                    f"Successfully exported Plot_3D data for sample set '{sample_set_name}'.\\n\\n"
-                    f"Created {len(created_files)} file(s):\\n{files_list}\\n\\n"
-                    f"These files can be loaded in Plot_3D for 3D color space analysis."
-                )
-            else:
-                messagebox.showerror(
-                    "Export Failed",
-                    f"Failed to export Plot_3D data for sample set '{sample_set_name}'.\\n\\n"
-                    f"No files were created. Please check the sample set has valid data."
-                )
-                
-        except ImportError as e:
-            messagebox.showerror(
-                "Missing Component",
-                f"Plot3D export functionality not available:\\n\\n{str(e)}"
-            )
-        except Exception as e:
-            messagebox.showerror(
-                "Export Error",
-                f"Failed to export for Plot3D:\\n\\n{str(e)}"
-            )
+        if self.database_manager:
+            return self.database_manager.export_data_for_plot3d(sample_set_name, measurements)
+        else:
+            return self._legacy_export_data_for_plot3d(sample_set_name, measurements)
 
     def view_spreadsheet(self):
-        """Open real-time spreadsheet view of color analysis data.
-        
-        Logic:
-        1. If there's a current sample set with analysis data -> show that specific analysis
-        2. If there's no current analysis -> show dialog to choose which data to view
-        """
-        try:
-            # Get sample set name from control panel
-            sample_set_name = self.app.control_panel.sample_set_name.get().strip()
-            
-            # Check if we have a current sample set with analysis data
-            has_current_analysis = False
-            if sample_set_name:
-                # Check if there's analysis data for the current sample set
-                from utils.color_analysis_db import ColorAnalysisDB
-                try:
-                    db = ColorAnalysisDB(sample_set_name)
-                    measurements = db.get_all_measurements()
-                    has_current_analysis = bool(measurements)
-                except:
-                    has_current_analysis = False
-            
-            if has_current_analysis:
-                # Case 1: We have current analysis data, show it directly
-                print(f"DEBUG: Opening real-time spreadsheet for current sample set: {sample_set_name}")
-                self._open_realtime_spreadsheet(sample_set_name)
-            else:
-                # Case 2: No current analysis, show selection dialog
-                print("DEBUG: No current analysis found, showing selection dialog")
-                self._show_realtime_data_selection_dialog()
-            
-        except Exception as e:
-            messagebox.showerror(
-                "View Error",
-                f"Failed to open spreadsheet view:\\n\\n{str(e)}"
-            )
+        """Open real-time spreadsheet view of color analysis data."""
+        if self.database_manager:
+            return self.database_manager.view_spreadsheet()
+        else:
+            return self._legacy_view_spreadsheet()
 
     def _show_realtime_data_selection_dialog(self):
         """Show dialog to select which spreadsheet data to view."""
@@ -2130,6 +2224,17 @@ class AnalysisManager:
     
     def open_black_ink_extractor(self):
         """Open the Black Ink Extractor for cancellation extraction."""
+        # Use the new BlackInkManager for cleaner code organization
+        try:
+            from managers.black_ink_manager import BlackInkManager
+            black_ink_manager = BlackInkManager(self.app)
+            black_ink_manager.open_black_ink_extractor()
+        except ImportError:
+            # Fallback to legacy implementation
+            self._legacy_black_ink_extractor()
+            
+    def _legacy_black_ink_extractor(self):
+        """Legacy black ink extractor implementation (fallback)."""
         if not self.app.current_file:
             messagebox.showwarning(
                 "No Image",
@@ -2524,3 +2629,235 @@ class AnalysisManager:
                 "Black Ink Extractor Error",
                 f"Failed to open Black Ink Extractor:\\n\\n{str(e)}"
             )
+    
+    def open_precision_measurements(self):
+        """Open the Precision Measurements tool for detailed stamp measurements."""
+        if not self.app.current_file:
+            messagebox.showwarning(
+                "No Image",
+                "Please open a stamp image first.\\n\\n"
+                "The Precision Measurements tool requires an image to measure."
+            )
+            return
+            
+        try:
+            # Import the precision measurement tool
+            from gui.precision_measurement_tool import PrecisionMeasurementTool
+            
+            # Create and show the precision measurement tool
+            tool = PrecisionMeasurementTool(
+                parent=self.root,
+                image_path=self.app.current_file,
+                main_app=self.app
+            )
+            
+        except ImportError:
+            messagebox.showerror(
+                "Module Error",
+                "Precision Measurements module not found.\\n\\n"
+                "Please ensure the precision measurement tool is properly installed."
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Precision Measurements Error",
+                f"Failed to open Precision Measurements tool:\\n\\n{str(e)}"
+            )
+    
+    # Legacy Database Methods (fallbacks when DatabaseManager not available)
+    
+    def _legacy_save_imported_data_to_database(self, sample_set_name, import_result):
+        """Legacy implementation of save_imported_data_to_database."""
+        try:
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            print(f"DEBUG: Creating database: {sample_set_name}")
+            db = ColorAnalysisDB(sample_set_name)
+            
+            saved_count = 0
+            
+            # Save centroid data first
+            if import_result.centroid_data:
+                print(f"DEBUG: Saving {len(import_result.centroid_data)} centroids")
+                for cluster_id, centroid_row in import_result.centroid_data:
+                    try:
+                        # Extract centroid info from the row
+                        centroid_x = float(centroid_row[8]) if centroid_row[8] and str(centroid_row[8]).strip() else None
+                        centroid_y = float(centroid_row[9]) if centroid_row[9] and str(centroid_row[9]).strip() else None
+                        centroid_z = float(centroid_row[10]) if centroid_row[10] and str(centroid_row[10]).strip() else None
+                        sphere_color = centroid_row[11] if centroid_row[11] and str(centroid_row[11]).strip() else None
+                        sphere_radius = float(centroid_row[12]) if centroid_row[12] and str(centroid_row[12]).strip() else None
+                        
+                        if centroid_x is not None and centroid_y is not None and centroid_z is not None:
+                            success = db.insert_or_update_centroid_data(
+                                cluster_id=cluster_id,
+                                centroid_x=centroid_x,
+                                centroid_y=centroid_y,
+                                centroid_z=centroid_z,
+                                sphere_color=sphere_color,
+                                sphere_radius=sphere_radius,
+                                marker='.',
+                                color='blue'
+                            )
+                            if success:
+                                saved_count += 1
+                                print(f"DEBUG: Saved centroid {cluster_id}: ({centroid_x}, {centroid_y}, {centroid_z})")
+                    except Exception as centroid_error:
+                        print(f"DEBUG: Error saving centroid {cluster_id}: {centroid_error}")
+            
+            # Save regular data
+            if import_result.data:
+                print(f"DEBUG: Saving {len(import_result.data)} data rows")
+                for i, row in enumerate(import_result.data):
+                    try:
+                        # Extract data from row
+                        x_norm = float(row[0]) if row[0] and str(row[0]).strip() else 0.0
+                        y_norm = float(row[1]) if row[1] and str(row[1]).strip() else 0.0
+                        z_norm = float(row[2]) if row[2] and str(row[2]).strip() else 0.0
+                        data_id = str(row[3]) if row[3] else f"Data_{i+1:03d}"
+                        cluster = int(row[4]) if row[4] and str(row[4]).strip() else None
+                        delta_e = float(row[5]) if row[5] and str(row[5]).strip() else None
+                        marker = str(row[6]) if row[6] else '.'
+                        color = str(row[7]) if row[7] else 'blue'
+                        
+                        # Parse DataID for database format
+                        if '_pt' in data_id:
+                            parts = data_id.split('_pt')
+                            image_name = parts[0]
+                            coord_point = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+                        else:
+                            image_name = data_id
+                            coord_point = 1
+                        
+                        # Insert as new measurement
+                        success = db.insert_new_measurement(
+                            image_name=image_name,
+                            coordinate_point=coord_point,
+                            x_pos=0.0,  # Position not relevant for imported data
+                            y_pos=0.0,
+                            l_value=x_norm,  # Store normalized values as L*a*b*
+                            a_value=y_norm,
+                            b_value=z_norm,
+                            rgb_r=0.0, rgb_g=0.0, rgb_b=0.0,
+                            cluster_id=cluster,
+                            delta_e=delta_e,
+                            centroid_x=float(row[8]) if row[8] and str(row[8]).strip() else None,
+                            centroid_y=float(row[9]) if row[9] and str(row[9]).strip() else None,
+                            centroid_z=float(row[10]) if row[10] and str(row[10]).strip() else None,
+                            sphere_color=str(row[11]) if row[11] and str(row[11]).strip() else None,
+                            sphere_radius=float(row[12]) if row[12] and str(row[12]).strip() else None,
+                            marker=marker,
+                            color=color,
+                            sample_type='imported_data',
+                            notes=f'Imported from external file'
+                        )
+                        
+                        if success:
+                            saved_count += 1
+                            if i % 50 == 0:  # Progress indicator
+                                print(f"DEBUG: Saved {i+1} data rows so far...")
+                    
+                    except Exception as row_error:
+                        print(f"DEBUG: Error saving data row {i}: {row_error}")
+                        continue
+            
+            print(f"DEBUG: Database save completed - {saved_count} total records saved")
+            return saved_count
+            
+        except Exception as e:
+            print(f"DEBUG: Error saving to database: {e}")
+            logger.error(f"Error saving imported data to database: {e}")
+            raise
+    
+    def _legacy_open_internal_viewer(self, sample_set_name):
+        """Legacy implementation of open_internal_viewer."""
+        try:
+            from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+            
+            # Use the new real-time Excel-like spreadsheet
+            spreadsheet = RealtimePlot3DSheet(
+                parent=self.root,
+                sample_set_name=sample_set_name
+            )
+            
+            logger.info(f"Opened real-time spreadsheet for: {sample_set_name}")
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to open real-time viewer:\\n\\n{str(e)}"
+            )
+    
+    def _legacy_view_spreadsheet(self):
+        """Legacy implementation of view_spreadsheet."""
+        try:
+            # Get sample set name from control panel
+            sample_set_name = self.app.control_panel.sample_set_name.get().strip()
+            
+            # Check if we have a current sample set with analysis data
+            has_current_analysis = False
+            if sample_set_name:
+                # Check if there's analysis data for the current sample set
+                from utils.color_analysis_db import ColorAnalysisDB
+                try:
+                    db = ColorAnalysisDB(sample_set_name)
+                    measurements = db.get_all_measurements()
+                    has_current_analysis = bool(measurements)
+                except:
+                    has_current_analysis = False
+            
+            if has_current_analysis:
+                # Case 1: We have current analysis data, show it directly
+                print(f"DEBUG: Opening real-time spreadsheet for current sample set: {sample_set_name}")
+                self._legacy_open_realtime_spreadsheet(sample_set_name)
+            else:
+                # Case 2: No current analysis, show selection dialog
+                print("DEBUG: No current analysis found, showing selection dialog")
+                messagebox.showinfo(
+                    "No Analysis Data",
+                    "No current analysis data found. Please run color analysis first."
+                )
+            
+        except Exception as e:
+            messagebox.showerror(
+                "View Error",
+                f"Failed to open spreadsheet view:\\n\\n{str(e)}"
+            )
+    
+    def _legacy_open_realtime_spreadsheet(self, sample_set_name):
+        """Legacy implementation of open_realtime_spreadsheet."""
+        try:
+            from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+            
+            # Create the real-time spreadsheet
+            sheet = RealtimePlot3DSheet(self.root, sample_set_name)
+            logger.info(f"Opened real-time spreadsheet for: {sample_set_name}")
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to open real-time spreadsheet:\\n\\n{str(e)}"
+            )
+    
+    def _legacy_create_plot3d_worksheet_with_name(self, sample_set_name, populate=True):
+        """Legacy implementation of create_plot3d_worksheet_with_name."""
+        messagebox.showinfo(
+            "Feature Unavailable",
+            "Plot3D worksheet creation is not available.\\n\\n"
+            "DatabaseManager component is missing."
+        )
+    
+    def _legacy_create_and_launch_from_database(self, sample_set_name):
+        """Legacy implementation of create_and_launch_from_database."""
+        messagebox.showinfo(
+            "Feature Unavailable",
+            "Database launch functionality is not available.\\n\\n"
+            "DatabaseManager component is missing."
+        )
+    
+    def _legacy_export_data_for_plot3d(self, sample_set_name, measurements):
+        """Legacy implementation of export_data_for_plot3d."""
+        messagebox.showinfo(
+            "Feature Unavailable",
+            "Plot3D export functionality is not available.\\n\\n"
+            "DatabaseManager component is missing."
+        )

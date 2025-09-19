@@ -6,7 +6,7 @@ Main application window that coordinates all managers and UI components.
 
 import os
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import logging
 
 from gui.canvas import CropCanvas, ShapeType, ToolMode
@@ -216,6 +216,22 @@ class StampZApp:
     def open_black_ink_extractor(self):
         """Delegate to analysis manager."""
         return self.analysis_manager.open_black_ink_extractor()
+        
+    def open_precision_measurements(self):
+        """Delegate to analysis manager."""
+        return self.analysis_manager.open_precision_measurements()
+        
+    def export_individual_to_unified_logger(self):
+        """Export individual color measurements to unified data logger."""
+        return self._export_to_unified_logger(export_type="individual")
+        
+    def export_averaged_to_unified_logger(self):
+        """Export averaged color measurement to unified data logger."""
+        return self._export_to_unified_logger(export_type="averaged")
+        
+    def export_both_to_unified_logger(self):
+        """Export both individual and averaged measurements to unified data logger."""
+        return self._export_to_unified_logger(export_type="both")
         
     def open_database_viewer(self):
         """Open the database viewer window."""
@@ -781,5 +797,507 @@ class StampZApp:
             from tkinter import messagebox
             messagebox.showerror(
                 "Clear Error", 
-                f"Failed to clear sample markers:\n\n{str(e)}"
+                f"Failed to clear sample markers:\\n\\n{str(e)}"
             )
+            
+    def _export_to_unified_logger(self, export_type="individual"):
+        """Export color measurements to unified data logger with sample set selection.
+        
+        Args:
+            export_type: Either "individual" or "averaged"
+        """
+        try:
+            # Check if we have a current image
+            if not self.current_file:
+                messagebox.showerror(
+                    "No Image", 
+                    "Please open an image first. The unified data logger creates files alongside the current image."
+                )
+                return
+            
+            # Get available sample sets
+            available_sets = self._get_available_sample_sets_for_export()
+            
+            if not available_sets:
+                messagebox.showinfo(
+                    "No Data",
+                    "No color analysis data found. Please perform color analysis first."
+                )
+                return
+            
+            # Show sample set selection dialog
+            selected_set = self._show_sample_set_selection_dialog(
+                available_sets, 
+                export_type
+            )
+            
+            if not selected_set:
+                return  # User cancelled
+            
+            # Extract just the sample set name (remove count info)
+            sample_set_name = selected_set.split(" (")[0]
+            
+            # Export to unified logger based on type
+            if export_type == "individual":
+                success = self._export_individual_measurements_to_logger(sample_set_name)
+            elif export_type == "averaged":
+                success = self._export_averaged_measurements_to_logger(sample_set_name)
+            else:  # both
+                success = self._export_both_measurements_to_logger(sample_set_name)
+            
+            if not success:
+                messagebox.showerror(
+                    "Export Failed",
+                    f"Failed to export {export_type} measurements to unified data logger."
+                )
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Export Error",
+                f"Failed to export to unified data logger:\\n\\n{str(e)}"
+            )
+            
+    def _get_available_sample_sets_for_export(self):
+        """Get list of sample sets with measurement data."""
+        try:
+            import sqlite3
+            from utils.path_utils import get_color_analysis_dir
+            
+            analysis_dir = get_color_analysis_dir()
+            if not os.path.exists(analysis_dir):
+                return []
+                
+            db_files = [f for f in os.listdir(analysis_dir) if f.endswith('.db')]
+            
+            sample_sets = []
+            for db_file in db_files:
+                # Extract sample set name from filename (remove .db extension)
+                set_name = os.path.splitext(db_file)[0]
+                
+                # Skip averaged databases for this listing
+                if set_name.endswith('_averages'):
+                    continue
+                
+                # Verify it has data
+                db_path = os.path.join(analysis_dir, db_file)
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM measurements")
+                    count = cursor.fetchone()[0]
+                    conn.close()
+                    
+                    if count > 0:
+                        sample_sets.append(f"{set_name} ({count} measurements)")
+                except:
+                    # If we can't read it, skip it
+                    pass
+            
+            return sorted(sample_sets)
+            
+        except Exception as e:
+            print(f"Error getting sample sets for export: {e}")
+            return []
+            
+    def _show_sample_set_selection_dialog(self, available_sets, export_type):
+        """Show dialog to select sample set for export.
+        
+        Args:
+            available_sets: List of available sample sets
+            export_type: "individual" or "averaged"
+            
+        Returns:
+            Selected sample set string or None if cancelled
+        """
+        try:
+            from tkinter import Toplevel, Listbox, Scrollbar, Frame, Label, Button
+            
+            dialog = Toplevel(self.root)
+            dialog.title(f"Export {export_type.title()} Measurements")
+            
+            dialog_width = 450
+            dialog_height = 350
+            
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            x = (screen_width - dialog_width) // 2
+            y = (screen_height - dialog_height) // 2
+            
+            dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+            dialog.resizable(False, False)
+            
+            dialog.transient(self.root)
+            dialog.grab_set()
+            dialog.focus_force()
+            
+            # Header
+            header_text = f"Export {export_type.title()} Measurements to Unified Data Logger"
+            Label(dialog, text=header_text, font=("Arial", 12, "bold")).pack(pady=(15, 10))
+            
+            # Instructions
+            instruction_text = (
+                f"Select a sample set to export {export_type} measurements:\n"
+                f"Data will be added to the unified log file for the current image."
+            )
+            Label(
+                dialog, 
+                text=instruction_text, 
+                font=("Arial", 10),
+                wraplength=400,
+                justify="center"
+            ).pack(pady=(0, 15))
+            
+            # Listbox frame
+            listbox_frame = Frame(dialog)
+            listbox_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
+            
+            listbox = Listbox(listbox_frame, font=("Arial", 11))
+            listbox.pack(side="left", fill="both", expand=True)
+            
+            scrollbar = Scrollbar(listbox_frame)
+            scrollbar.pack(side="right", fill="y")
+            listbox.config(yscrollcommand=scrollbar.set)
+            scrollbar.config(command=listbox.yview)
+            
+            # Populate listbox
+            for set_name in available_sets:
+                listbox.insert("end", set_name)
+            
+            if available_sets:
+                listbox.selection_set(0)  # Select first item
+            
+            # Result variable
+            selected_set = None
+            
+            def on_export():
+                nonlocal selected_set
+                selection = listbox.curselection()
+                if not selection:
+                    messagebox.showwarning(
+                        "No Selection", 
+                        "Please select a sample set to export."
+                    )
+                    return
+                
+                selected_set = available_sets[selection[0]]
+                dialog.quit()
+                dialog.destroy()
+            
+            def on_cancel():
+                dialog.quit()
+                dialog.destroy()
+            
+            # Button frame
+            button_frame = Frame(dialog)
+            button_frame.pack(fill="x", padx=20, pady=(0, 20))
+            
+            export_button = Button(
+                button_frame, 
+                text=f"Export {export_type.title()}", 
+                command=on_export, 
+                width=15,
+                bg="#4CAF50",
+                fg="white",
+                font=("Arial", 10, "bold")
+            )
+            export_button.pack(side="left", padx=(0, 10))
+            
+            cancel_button = Button(
+                button_frame, 
+                text="Cancel", 
+                command=on_cancel, 
+                width=10
+            )
+            cancel_button.pack(side="right")
+            
+            # Bind events
+            dialog.bind('<Return>', lambda e: on_export())
+            dialog.bind('<Escape>', lambda e: on_cancel())
+            listbox.bind("<Double-Button-1>", lambda e: on_export())
+            
+            # Focus on listbox
+            listbox.focus_set()
+            
+            dialog.mainloop()
+            
+            return selected_set
+            
+        except Exception as e:
+            print(f"Error showing sample set selection dialog: {e}")
+            return None
+            
+    def _export_individual_measurements_to_logger(self, sample_set_name):
+        """Export individual measurements to unified data logger.
+        
+        Args:
+            sample_set_name: Name of the sample set to export
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Get measurements from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            if not db_measurements:
+                messagebox.showwarning(
+                    "No Data",
+                    f"No measurements found for sample set '{sample_set_name}'."
+                )
+                return False
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.current_file)
+            
+            # Log individual measurements
+            log_file = logger.log_individual_color_measurements(
+                db_measurements, sample_set_name, self.current_file
+            )
+            
+            if log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"Individual color measurements exported to unified data logger.\n\n"
+                    f"Sample Set: {sample_set_name}\n"
+                    f"File: {log_file.name}\n"
+                    f"Measurements: {len(db_measurements)} samples\n\n"
+                    f"Data has been appended to your comprehensive analysis log."
+                )
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"Error exporting individual measurements: {e}")
+            return False
+            
+    def _export_averaged_measurements_to_logger(self, sample_set_name):
+        """Export averaged measurement to unified data logger.
+        
+        Args:
+            sample_set_name: Name of the sample set to export
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analyzer import ColorAnalyzer
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Calculate averaged measurement from individual measurements
+            analyzer = ColorAnalyzer()
+            
+            # Get individual measurements from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            if not db_measurements:
+                messagebox.showwarning(
+                    "No Data",
+                    f"No measurements found for sample set '{sample_set_name}'."
+                )
+                return False
+            
+            # Calculate quality-controlled average
+            lab_values = [(m['l_value'], m['a_value'], m['b_value']) for m in db_measurements]
+            rgb_values = [(m['rgb_r'], m['rgb_g'], m['rgb_b']) for m in db_measurements]
+            
+            averaging_result = analyzer._calculate_quality_controlled_average(lab_values, rgb_values)
+            
+            # Create averaged data dictionary
+            averaged_data = {
+                'l_value': averaging_result['avg_lab'][0],
+                'a_value': averaging_result['avg_lab'][1], 
+                'b_value': averaging_result['avg_lab'][2],
+                'rgb_r': averaging_result['avg_rgb'][0],
+                'rgb_g': averaging_result['avg_rgb'][1],
+                'rgb_b': averaging_result['avg_rgb'][2],
+                'notes': f"ΔE max: {averaging_result['max_delta_e']:.2f}, "
+                        f"used {averaging_result['samples_used']}/{len(db_measurements)} samples"
+            }
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.current_file)
+            
+            # Log averaged measurement
+            log_file = logger.log_averaged_color_measurement(
+                averaged_data, sample_set_name, self.current_file, len(db_measurements)
+            )
+            
+            if log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"Averaged color measurement exported to unified data logger.\n\n"
+                    f"Sample Set: {sample_set_name}\n"
+                    f"File: {log_file.name}\n"
+                    f"Source: {len(db_measurements)} individual samples\n"
+                    f"Quality: ΔE max = {averaging_result['max_delta_e']:.2f}\n\n"
+                    f"High-quality averaged data has been added to your comprehensive analysis log."
+                )
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"Error exporting averaged measurement: {e}")
+            return False
+            
+    def _export_both_measurements_to_logger(self, sample_set_name):
+        """Export both individual and averaged measurements to unified data logger.
+        
+        Args:
+            sample_set_name: Name of the sample set to export
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from utils.unified_data_logger import UnifiedDataLogger
+            from utils.color_analyzer import ColorAnalyzer
+            from utils.color_analysis_db import ColorAnalysisDB
+            
+            # Get measurements from database filtered by current image
+            db = ColorAnalysisDB(sample_set_name)
+            current_image_name = os.path.basename(self.current_file)
+            
+            # Debug: Check what's in the database vs what we're looking for
+            all_measurements = db.get_all_measurements()
+            if all_measurements:
+                unique_image_names = set(m['image_name'] for m in all_measurements)
+                print(f"DEBUG: Looking for image: '{current_image_name}'")
+                print(f"DEBUG: Available images in database: {list(unique_image_names)}")
+                
+                # Try to find a match using the pattern extraction logic
+                from utils.color_analyzer import ColorAnalyzer
+                analyzer = ColorAnalyzer()
+                sample_identifier = analyzer._extract_sample_identifier_from_filename(self.current_file)
+                print(f"DEBUG: Sample identifier from filename: '{sample_identifier}'")
+                
+                # Try both full filename and extracted identifier
+                db_measurements = db.get_measurements_for_image(current_image_name)
+                if not db_measurements:
+                    print(f"DEBUG: No measurements found for full filename, trying sample identifier...")
+                    db_measurements = db.get_measurements_for_image(sample_identifier)
+            else:
+                print(f"DEBUG: No measurements found in database at all")
+                db_measurements = []
+            
+            if not db_measurements:
+                messagebox.showwarning(
+                    "No Data",
+                    f"No measurements found for sample set '{sample_set_name}'."
+                )
+                return False
+            
+            # Create data logger for current image
+            logger = UnifiedDataLogger(self.current_file)
+            
+            # First export individual measurements
+            individual_log_file = logger.log_individual_color_measurements(
+                db_measurements, sample_set_name, self.current_file
+            )
+            
+            if not individual_log_file:
+                messagebox.showerror("Export Failed", "Failed to export individual measurements to data logger.")
+                return False
+            
+            # Calculate and export averaged measurement
+            analyzer = ColorAnalyzer()
+            
+            # Calculate quality-controlled average
+            lab_values = [(m['l_value'], m['a_value'], m['b_value']) for m in db_measurements]
+            rgb_values = [(m['rgb_r'], m['rgb_g'], m['rgb_b']) for m in db_measurements]
+            
+            averaging_result = analyzer._calculate_quality_controlled_average(lab_values, rgb_values)
+            
+            # Create averaged data dictionary
+            averaged_data = {
+                'l_value': averaging_result['avg_lab'][0],
+                'a_value': averaging_result['avg_lab'][1], 
+                'b_value': averaging_result['avg_lab'][2],
+                'rgb_r': averaging_result['avg_rgb'][0],
+                'rgb_g': averaging_result['avg_rgb'][1],
+                'rgb_b': averaging_result['avg_rgb'][2],
+                'notes': f"ΔE max: {averaging_result['max_delta_e']:.2f}, "
+                        f"used {averaging_result['samples_used']}/{len(db_measurements)} samples"
+            }
+            
+            # Export averaged measurement
+            averaged_log_file = logger.log_averaged_color_measurement(
+                averaged_data, sample_set_name, self.current_file, len(db_measurements)
+            )
+            
+            if averaged_log_file:
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"BOTH individual and averaged measurements exported to unified data logger!\n\n"
+                    f"Sample Set: {sample_set_name}\n"
+                    f"File: {averaged_log_file.name}\n\n"
+                    f"INDIVIDUAL DATA:\n"
+                    f"  • {len(db_measurements)} sample measurements\n"
+                    f"  • Complete L*a*b* and RGB values\n"
+                    f"  • Position and sample details\n\n"
+                    f"AVERAGED DATA:\n"
+                    f"  • Quality-controlled average\n"
+                    f"  • ΔE max = {averaging_result['max_delta_e']:.2f}\n"
+                    f"  • Used {averaging_result['samples_used']}/{len(db_measurements)} samples\n\n"
+                    f"Your comprehensive analysis log now contains both detailed individual \n"
+                    f"measurements AND high-quality averaged data for complete documentation."
+                )
+                return True
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"Error exporting both measurements: {e}")
+            return False

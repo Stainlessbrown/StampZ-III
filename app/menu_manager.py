@@ -121,10 +121,17 @@ class MenuManager:
         self.color_menu.add_separator()
         
         self.color_menu.add_command(
-            label="Black Ink Extractor...", 
+            label="Black Ink Extractor...",
             command=self.app.open_black_ink_extractor
         )
+        self.color_menu.add_command(
+            label="Precision Measurements...",
+            command=self.app.open_precision_measurements
+        )
         self.color_menu.add_separator()
+        
+        # Note: Export to Unified Data Logger options have been moved to the Compare window
+        # for better user control and workflow integration
         
         self.color_menu.add_command(
             label="Export Analysis with Library Matches...", 
