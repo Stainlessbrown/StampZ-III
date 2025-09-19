@@ -123,11 +123,31 @@ def extract_colored_cancellation(img_array, cancellation_color='red', color_thre
         dict with extracted cancellation images and analysis
     """
     
+    # Debug info
+    print(f"DEBUG: Input array shape: {img_array.shape}, dtype: {img_array.dtype}")
+    print(f"DEBUG: Array value range: {img_array.min()} - {img_array.max()}")
+    print(f"DEBUG: Extracting {cancellation_color} cancellation")
+    
     # Convert to HSV for better color detection
     from PIL import Image
-    pil_image = Image.fromarray(img_array)
-    hsv_image = pil_image.convert('HSV')
-    hsv_array = np.array(hsv_image)
+    
+    # Ensure image array is proper uint8 format for PIL
+    if img_array.dtype != np.uint8:
+        img_array = img_array.astype(np.uint8)
+    
+    # Ensure values are in proper range
+    img_array = np.clip(img_array, 0, 255)
+    
+    try:
+        pil_image = Image.fromarray(img_array.astype(np.uint8))
+        hsv_image = pil_image.convert('HSV')
+        hsv_array = np.array(hsv_image)
+        print(f"DEBUG: HSV conversion successful, shape: {hsv_array.shape}, dtype: {hsv_array.dtype}")
+    except Exception as e:
+        print(f"DEBUG: HSV conversion failed: {e}")
+        print(f"DEBUG: Falling back to RGB-only method")
+        # Fall back to RGB-only detection if HSV fails
+        return extract_colored_cancellation_rgb_only(img_array, cancellation_color, color_threshold)
     
     h_channel = hsv_array[:, :, 0].astype(np.float32)
     s_channel = hsv_array[:, :, 1].astype(np.float32) 
@@ -246,6 +266,110 @@ def extract_colored_cancellation(img_array, cancellation_color='red', color_thre
         'color_threshold_used': color_threshold,
         'saturation_threshold_used': saturation_threshold,
         'avg_cancellation_brightness': np.mean(gray[final_mask]) if np.any(final_mask) else 0
+    }
+    
+    return results, mask_uint8, analysis
+
+def extract_colored_cancellation_rgb_only(img_array, cancellation_color='red', color_threshold=40):
+    """
+    RGB-only fallback method for colored cancellation extraction.
+    
+    This method avoids HSV conversion issues by using only RGB channel analysis.
+    """
+    print(f"DEBUG: Using RGB-only extraction for {cancellation_color}")
+    
+    # Ensure proper data type
+    if img_array.dtype != np.uint8:
+        img_array = img_array.astype(np.uint8)
+    img_array = np.clip(img_array, 0, 255)
+    
+    red = img_array[:, :, 0].astype(np.float32)
+    green = img_array[:, :, 1].astype(np.float32)
+    blue = img_array[:, :, 2].astype(np.float32)
+    
+    # RGB-based color detection
+    if cancellation_color == 'red':
+        # Red should dominate over green and blue
+        color_mask = (red > green + color_threshold) & (red > blue + color_threshold)
+        # Also ensure red is reasonably strong
+        color_mask = color_mask & (red > 100)
+    elif cancellation_color == 'blue':
+        # Blue should dominate over red and green  
+        color_mask = (blue > red + color_threshold) & (blue > green + color_threshold)
+        color_mask = color_mask & (blue > 100)
+    elif cancellation_color == 'green':
+        # Green should dominate over red and blue
+        color_mask = (green > red + color_threshold) & (green > blue + color_threshold)
+        color_mask = color_mask & (green > 100)
+    else:
+        color_mask = np.zeros_like(red, dtype=bool)
+    
+    # Convert to uint8 mask
+    mask_uint8 = (color_mask * 255).astype(np.uint8)
+    
+    # Clean up the mask if OpenCV is available
+    try:
+        import cv2
+        kernel = np.ones((3,3), np.uint8)
+        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
+        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
+    except ImportError:
+        pass
+    
+    # Convert back to boolean
+    final_mask = mask_uint8 > 127
+    
+    # Create extraction results
+    results = {}
+    gray = np.mean(img_array, axis=2).astype(np.uint8)
+    
+    # 1. Pure colored cancellation on white
+    results['pure_colored'] = np.where(final_mask, 0, 255).astype(np.uint8)
+    
+    # 2. Preserve original colors of the cancellation
+    color_preserved = np.where(
+        np.stack([final_mask, final_mask, final_mask], axis=2),
+        img_array,
+        [255, 255, 255]
+    )
+    results['color_preserved'] = color_preserved
+    
+    # 3. Grayscale version
+    results['grayscale'] = np.where(final_mask, gray, 255)
+    
+    # 4. Enhanced contrast version
+    if np.any(final_mask):
+        cancellation_values = gray[final_mask]
+        if len(cancellation_values) > 0:
+            min_val, max_val = cancellation_values.min(), cancellation_values.max()
+            if max_val > min_val:
+                enhanced = np.where(
+                    final_mask,
+                    ((gray - min_val) / (max_val - min_val) * 255).astype(np.uint8),
+                    255
+                )
+                results['enhanced'] = enhanced
+            else:
+                results['enhanced'] = results['grayscale']
+        else:
+            results['enhanced'] = results['grayscale']
+    else:
+        results['enhanced'] = results['grayscale']
+    
+    # Analysis
+    total_pixels = final_mask.size
+    cancellation_pixels = np.sum(final_mask)
+    coverage_percentage = (cancellation_pixels / total_pixels) * 100
+    
+    analysis = {
+        'coverage_percentage': coverage_percentage,
+        'total_pixels': total_pixels,
+        'cancellation_pixels': cancellation_pixels,
+        'cancellation_color': cancellation_color,
+        'color_threshold_used': color_threshold,
+        'saturation_threshold_used': 'N/A (RGB-only mode)',
+        'avg_cancellation_brightness': np.mean(gray[final_mask]) if np.any(final_mask) else 0,
+        'extraction_method': 'RGB-only fallback'
     }
     
     return results, mask_uint8, analysis
