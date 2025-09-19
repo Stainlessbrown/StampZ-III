@@ -2138,9 +2138,9 @@ class AnalysisManager:
             )
             return
             
-        # Import the black ink extraction functionality
+        # Import the extraction functionality
         try:
-            from black_ink_extractor import extract_black_ink
+            from black_ink_extractor import extract_black_ink, extract_colored_cancellation
         except ImportError:
             messagebox.showerror(
                 "Module Error",
@@ -2186,12 +2186,14 @@ class AnalysisManager:
             desc_frame.pack(fill="x", padx=20, pady=10)
             
             description = (
-                "This tool extracts black cancellation ink from colored stamps, \n"
-                "creating clean cancellation images on white backgrounds.\n\n"
-                "Works best with:\n"
-                "• Light to medium colored stamps\n"
-                "• Good contrast between black cancellation and stamp colors\n"
-                "• 48-bit TIFF files from VueScan (but works with all formats)"
+                "This tool extracts cancellation ink from stamps, supporting black, \\n"
+                "red, blue, and green cancellations for comprehensive philatelic research.\\n\\n"
+                "Cancellation types:\\n"
+                "• Black (most common postmarks)\\n"
+                "• Red (early years, postage due markings)\\n"
+                "• Blue (international mail, documents)\\n"
+                "• Green (rare specialized markings)\\n\\n"
+                "Works with 48-bit TIFF files from VueScan and all image formats."
             )
             
             ttk.Label(
@@ -2200,6 +2202,26 @@ class AnalysisManager:
                 font=("Arial", 9),
                 justify="left"
             ).pack(anchor="w")
+            
+            # Cancellation type selection
+            type_frame = ttk.LabelFrame(dialog, text="Cancellation Type", padding=10)
+            type_frame.pack(fill="x", padx=20, pady=10)
+            
+            cancellation_type = tk.StringVar(value="black")
+            type_options = [
+                ("Black (most common)", "black"),
+                ("Red (early years, postage due)", "red"), 
+                ("Blue (international, documents)", "blue"),
+                ("Green (rare)", "green")
+            ]
+            
+            for i, (text, value) in enumerate(type_options):
+                ttk.Radiobutton(
+                    type_frame, 
+                    text=text, 
+                    variable=cancellation_type, 
+                    value=value
+                ).grid(row=i//2, column=i%2, sticky="w", padx=10, pady=2)
             
             # Settings frame
             settings_frame = ttk.LabelFrame(dialog, text="Extraction Settings", padding=10)
@@ -2241,8 +2263,8 @@ class AnalysisManager:
                 saturation_threshold_label.config(text=str(int(saturation_threshold.get())))
             saturation_threshold_scale.bind("<Motion>", update_saturation_threshold)
             
-            # Red offset setting
-            ttk.Label(settings_frame, text="Red Channel Offset:").grid(row=2, column=0, sticky="w", pady=2)
+            # Color threshold setting (used differently for black vs colored)
+            ttk.Label(settings_frame, text="Color Threshold:").grid(row=2, column=0, sticky="w", pady=2)
             red_offset = tk.IntVar(value=40)
             red_offset_scale = ttk.Scale(
                 settings_frame,
@@ -2305,16 +2327,27 @@ class AnalysisManager:
                         pil_image = pil_image.convert('RGB')
                     img_array = np.array(pil_image)
                     
-                    status_label.config(text="Extracting black ink...")
+                    # Get selected cancellation type
+                    cancel_type = cancellation_type.get()
+                    status_label.config(text=f"Extracting {cancel_type} ink...")
                     dialog.update()
                     
-                    # Extract black ink
-                    results, mask, analysis = extract_black_ink(
-                        img_array,
-                        black_threshold=int(black_threshold.get()),
-                        saturation_threshold=int(saturation_threshold.get()),
-                        red_offset=int(red_offset.get())
-                    )
+                    # Extract cancellation based on type
+                    if cancel_type == 'black':
+                        results, mask, analysis = extract_black_ink(
+                            img_array,
+                            black_threshold=int(black_threshold.get()),
+                            saturation_threshold=int(saturation_threshold.get()),
+                            red_offset=int(red_offset.get())
+                        )
+                    else:
+                        # For colored cancellations (red, blue, green)
+                        results, mask, analysis = extract_colored_cancellation(
+                            img_array,
+                            cancellation_color=cancel_type,
+                            color_threshold=int(red_offset.get()),  # Repurpose as color threshold
+                            saturation_threshold=int(saturation_threshold.get())
+                        )
                     
                     status_label.config(text="Saving results...")
                     dialog.update()
@@ -2328,19 +2361,39 @@ class AnalysisManager:
                     # Save results (streamlined - only essential files)
                     saved_files = []
                     
-                    # Save only the most useful extraction results
+                    # Save results based on cancellation type
+                    saved_files = []
                     best_result_path = None
+                    cancel_type = cancellation_type.get()
                     
-                    # 1. Pure black cancellation (main result)
-                    pure_black_path = output_dir / f"{base_name}_pure_black_cancellation.png"
-                    Image.fromarray(results['pure_black']).save(pure_black_path)
-                    saved_files.append(pure_black_path)
-                    best_result_path = pure_black_path
-                    
-                    # 2. Grayscale version (preserves ink density)
-                    grayscale_path = output_dir / f"{base_name}_grayscale_cancellation.png"
-                    Image.fromarray(results['grayscale']).save(grayscale_path)
-                    saved_files.append(grayscale_path)
+                    if cancel_type == 'black':
+                        # 1. Pure black cancellation (main result)
+                        pure_result_path = output_dir / f"{base_name}_pure_black_cancellation.png"
+                        Image.fromarray(results['pure_black']).save(pure_result_path)
+                        saved_files.append(pure_result_path)
+                        best_result_path = pure_result_path
+                        
+                        # 2. Grayscale version (preserves ink density)
+                        grayscale_path = output_dir / f"{base_name}_grayscale_cancellation.png"
+                        Image.fromarray(results['grayscale']).save(grayscale_path)
+                        saved_files.append(grayscale_path)
+                    else:
+                        # For colored cancellations
+                        # 1. Color-preserved version (main result - shows actual color)
+                        color_result_path = output_dir / f"{base_name}_{cancel_type}_color_cancellation.png"
+                        Image.fromarray(results['color_preserved']).save(color_result_path)
+                        saved_files.append(color_result_path)
+                        best_result_path = color_result_path
+                        
+                        # 2. Pure colored version (high contrast)
+                        pure_result_path = output_dir / f"{base_name}_pure_{cancel_type}_cancellation.png"
+                        Image.fromarray(results['pure_colored']).save(pure_result_path)
+                        saved_files.append(pure_result_path)
+                        
+                        # 3. Grayscale version
+                        grayscale_path = output_dir / f"{base_name}_{cancel_type}_grayscale_cancellation.png"
+                        Image.fromarray(results['grayscale']).save(grayscale_path)
+                        saved_files.append(grayscale_path)
                     
                     # 3. Create and save adaptive mask (the one you mentioned wanting)
                     # This shows the detection method that works well

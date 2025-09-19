@@ -109,6 +109,147 @@ def extract_black_ink(img_array, black_threshold=60, saturation_threshold=30, re
     
     return results, black_ink_mask, analysis
 
+def extract_colored_cancellation(img_array, cancellation_color='red', color_threshold=40, saturation_threshold=50):
+    """
+    Extract colored cancellation ink (red, blue, green) from stamp images.
+    
+    Args:
+        img_array: RGB image as numpy array
+        cancellation_color: 'red', 'blue', or 'green'
+        color_threshold: How strong the target color should be (0-255)
+        saturation_threshold: Minimum saturation to avoid picking up neutral areas
+    
+    Returns:
+        dict with extracted cancellation images and analysis
+    """
+    
+    # Convert to HSV for better color detection
+    from PIL import Image
+    pil_image = Image.fromarray(img_array)
+    hsv_image = pil_image.convert('HSV')
+    hsv_array = np.array(hsv_image)
+    
+    h_channel = hsv_array[:, :, 0].astype(np.float32)
+    s_channel = hsv_array[:, :, 1].astype(np.float32) 
+    v_channel = hsv_array[:, :, 2].astype(np.float32)
+    
+    # Define color ranges in HSV (Hue is 0-179 in OpenCV/PIL HSV)
+    color_ranges = {
+        'red': [(0, 15), (160, 179)],     # Red wraps around in HSV
+        'blue': [(100, 130)],             # Blue range
+        'green': [(40, 80)]               # Green range  
+    }
+    
+    # Create mask for target color
+    color_mask = np.zeros_like(h_channel, dtype=bool)
+    
+    if cancellation_color in color_ranges:
+        for hue_min, hue_max in color_ranges[cancellation_color]:
+            # HSV hue range check
+            hue_match = (h_channel >= hue_min) & (h_channel <= hue_max)
+            color_mask = color_mask | hue_match
+    
+    # Apply saturation and value thresholds
+    # High enough saturation to be actually colored (not grayish)
+    saturation_mask = s_channel > saturation_threshold
+    
+    # Not too dark (cancellations are usually visible)
+    value_mask = v_channel > 30
+    
+    # Combine all conditions
+    final_mask = color_mask & saturation_mask & value_mask
+    
+    # Also check RGB dominance for the target color as backup method
+    red = img_array[:, :, 0].astype(np.float32)
+    green = img_array[:, :, 1].astype(np.float32)
+    blue = img_array[:, :, 2].astype(np.float32)
+    
+    # RGB-based color detection (backup method)
+    if cancellation_color == 'red':
+        # Red should dominate over green and blue
+        rgb_mask = (red > green + color_threshold) & (red > blue + color_threshold)
+    elif cancellation_color == 'blue':
+        # Blue should dominate over red and green  
+        rgb_mask = (blue > red + color_threshold) & (blue > green + color_threshold)
+    elif cancellation_color == 'green':
+        # Green should dominate over red and blue
+        rgb_mask = (green > red + color_threshold) & (green > blue + color_threshold)
+    else:
+        rgb_mask = np.zeros_like(final_mask)
+    
+    # Combine HSV and RGB methods
+    combined_mask = final_mask | rgb_mask
+    
+    # Convert to uint8 for further processing
+    mask_uint8 = (combined_mask * 255).astype(np.uint8)
+    
+    # Clean up the mask with morphological operations
+    try:
+        import cv2
+        kernel = np.ones((3,3), np.uint8)
+        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
+        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
+    except ImportError:
+        # Fallback without OpenCV
+        pass
+    
+    # Convert back to boolean
+    final_mask = mask_uint8 > 127
+    
+    # Create extraction results
+    results = {}
+    gray = np.mean(img_array, axis=2).astype(np.uint8)
+    
+    # 1. Pure colored cancellation on white
+    results['pure_colored'] = np.where(final_mask, 0, 255).astype(np.uint8)
+    
+    # 2. Preserve original colors of the cancellation
+    color_preserved = np.where(
+        np.stack([final_mask, final_mask, final_mask], axis=2),
+        img_array,
+        [255, 255, 255]
+    )
+    results['color_preserved'] = color_preserved
+    
+    # 3. Grayscale version
+    results['grayscale'] = np.where(final_mask, gray, 255)
+    
+    # 4. Enhanced contrast version
+    if np.any(final_mask):
+        cancellation_values = gray[final_mask]
+        if len(cancellation_values) > 0:
+            min_val, max_val = cancellation_values.min(), cancellation_values.max()
+            if max_val > min_val:
+                enhanced = np.where(
+                    final_mask,
+                    ((gray - min_val) / (max_val - min_val) * 255).astype(np.uint8),
+                    255
+                )
+                results['enhanced'] = enhanced
+            else:
+                results['enhanced'] = results['grayscale']
+        else:
+            results['enhanced'] = results['grayscale']
+    else:
+        results['enhanced'] = results['grayscale']
+    
+    # Analysis
+    total_pixels = final_mask.size
+    cancellation_pixels = np.sum(final_mask)
+    coverage_percentage = (cancellation_pixels / total_pixels) * 100
+    
+    analysis = {
+        'coverage_percentage': coverage_percentage,
+        'total_pixels': total_pixels,
+        'cancellation_pixels': cancellation_pixels,
+        'cancellation_color': cancellation_color,
+        'color_threshold_used': color_threshold,
+        'saturation_threshold_used': saturation_threshold,
+        'avg_cancellation_brightness': np.mean(gray[final_mask]) if np.any(final_mask) else 0
+    }
+    
+    return results, mask_uint8, analysis
+
 def process_image(image_path, output_dir=None, black_threshold=60, saturation_threshold=30, red_offset=40):
     """Process a single image and extract black ink cancellations."""
     
