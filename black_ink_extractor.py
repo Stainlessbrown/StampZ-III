@@ -15,6 +15,45 @@ Author: AI Assistant for StampZ-III Project
 
 from PIL import Image
 import numpy as np
+
+def safe_pil_fromarray(array, mode=None):
+    """Safely convert numpy array to PIL Image with comprehensive dtype handling."""
+    print(f"DEBUG: safe_pil_fromarray input - dtype: {array.dtype}, shape: {array.shape}")
+    
+    # Ensure proper uint8 format for PIL
+    if array.dtype != np.uint8:
+        print(f"DEBUG: Converting array from {array.dtype} to uint8")
+        if array.dtype in [np.uint16, np.int16, np.int32, np.int64]:
+            # Scale down from higher bit depths
+            if array.max() > 255:
+                array = (array.astype(np.float64) / array.max() * 255).astype(np.uint8)
+            else:
+                array = array.astype(np.uint8)
+        elif array.dtype in [np.float32, np.float64]:
+            # Handle float arrays (may be 0-1 or 0-255 range)
+            if array.max() <= 1.0:
+                array = (array * 255).astype(np.uint8)
+            else:
+                array = np.clip(array, 0, 255).astype(np.uint8)
+        else:
+            # Fallback for any other types
+            array = np.clip(array.astype(np.float64), 0, 255).astype(np.uint8)
+    
+    # Ensure values are in valid range
+    array = np.clip(array, 0, 255)
+    
+    print(f"DEBUG: safe_pil_fromarray converted - dtype: {array.dtype}, range: {array.min()}-{array.max()}")
+    
+    try:
+        return Image.fromarray(array, mode)
+    except Exception as e:
+        print(f"ERROR: PIL conversion still failed: {e}")
+        print(f"Array details: shape={array.shape}, dtype={array.dtype}, contiguous={array.flags['C_CONTIGUOUS']}")
+        # Try making contiguous
+        if not array.flags['C_CONTIGUOUS']:
+            array = np.ascontiguousarray(array)
+            return Image.fromarray(array, mode)
+        raise
 import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
@@ -122,177 +161,222 @@ def extract_colored_cancellation(img_array, cancellation_color='red', color_thre
     Returns:
         dict with extracted cancellation images and analysis
     """
-    
-    # Debug info
-    print(f"DEBUG: Input array shape: {img_array.shape}, dtype: {img_array.dtype}")
-    print(f"DEBUG: Array value range: {img_array.min()} - {img_array.max()}")
-    print(f"DEBUG: Extracting {cancellation_color} cancellation")
-    
-    # Convert to HSV for better color detection
-    from PIL import Image
-    
-    # Ensure image array is proper uint8 format for PIL
-    if img_array.dtype != np.uint8:
-        img_array = img_array.astype(np.uint8)
-    
-    # Ensure values are in proper range
-    img_array = np.clip(img_array, 0, 255)
-    
-    try:
-        pil_image = Image.fromarray(img_array.astype(np.uint8))
-        hsv_image = pil_image.convert('HSV')
-        hsv_array = np.array(hsv_image)
-        print(f"DEBUG: HSV conversion successful, shape: {hsv_array.shape}, dtype: {hsv_array.dtype}")
-    except Exception as e:
-        print(f"DEBUG: HSV conversion failed: {e}")
-        print(f"DEBUG: Falling back to RGB-only method")
-        # Fall back to RGB-only detection if HSV fails
-        return extract_colored_cancellation_rgb_only(img_array, cancellation_color, color_threshold)
-    
-    h_channel = hsv_array[:, :, 0].astype(np.float32)
-    s_channel = hsv_array[:, :, 1].astype(np.float32) 
-    v_channel = hsv_array[:, :, 2].astype(np.float32)
-    
-    # Define color ranges in HSV (Hue is 0-179 in OpenCV/PIL HSV)
-    color_ranges = {
-        'red': [(0, 15), (160, 179)],     # Red wraps around in HSV
-        'blue': [(100, 130)],             # Blue range
-        'green': [(40, 80)]               # Green range  
-    }
-    
-    # Create mask for target color
-    color_mask = np.zeros_like(h_channel, dtype=bool)
-    
-    if cancellation_color in color_ranges:
-        for hue_min, hue_max in color_ranges[cancellation_color]:
-            # HSV hue range check
-            hue_match = (h_channel >= hue_min) & (h_channel <= hue_max)
-            color_mask = color_mask | hue_match
-    
-    # Apply saturation and value thresholds
-    # High enough saturation to be actually colored (not grayish)
-    saturation_mask = s_channel > saturation_threshold
-    
-    # Not too dark (cancellations are usually visible)
-    value_mask = v_channel > 30
-    
-    # Combine all conditions
-    final_mask = color_mask & saturation_mask & value_mask
-    
-    # Also check RGB dominance for the target color as backup method
-    red = img_array[:, :, 0].astype(np.float32)
-    green = img_array[:, :, 1].astype(np.float32)
-    blue = img_array[:, :, 2].astype(np.float32)
-    
-    # RGB-based color detection (backup method)
-    if cancellation_color == 'red':
-        # Red should dominate over green and blue
-        rgb_mask = (red > green + color_threshold) & (red > blue + color_threshold)
-    elif cancellation_color == 'blue':
-        # Blue should dominate over red and green  
-        rgb_mask = (blue > red + color_threshold) & (blue > green + color_threshold)
-    elif cancellation_color == 'green':
-        # Green should dominate over red and blue
-        rgb_mask = (green > red + color_threshold) & (green > blue + color_threshold)
-    else:
-        rgb_mask = np.zeros_like(final_mask)
-    
-    # Combine HSV and RGB methods
-    combined_mask = final_mask | rgb_mask
-    
-    # Convert to uint8 for further processing
-    mask_uint8 = (combined_mask * 255).astype(np.uint8)
-    
-    # Clean up the mask with morphological operations
-    try:
-        import cv2
-        kernel = np.ones((3,3), np.uint8)
-        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel)
-        mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel)
-    except ImportError:
-        # Fallback without OpenCV
-        pass
-    
-    # Convert back to boolean
-    final_mask = mask_uint8 > 127
-    
-    # Create extraction results
-    results = {}
-    gray = np.mean(img_array, axis=2).astype(np.uint8)
-    
-    # 1. Pure colored cancellation on white
-    results['pure_colored'] = np.where(final_mask, 0, 255).astype(np.uint8)
-    
-    # 2. Preserve original colors of the cancellation
-    color_preserved = np.where(
-        np.stack([final_mask, final_mask, final_mask], axis=2),
-        img_array,
-        [255, 255, 255]
-    )
-    results['color_preserved'] = color_preserved
-    
-    # 3. Grayscale version
-    results['grayscale'] = np.where(final_mask, gray, 255)
-    
-    # 4. Enhanced contrast version
-    if np.any(final_mask):
-        cancellation_values = gray[final_mask]
-        if len(cancellation_values) > 0:
-            min_val, max_val = cancellation_values.min(), cancellation_values.max()
-            if max_val > min_val:
-                enhanced = np.where(
-                    final_mask,
-                    ((gray - min_val) / (max_val - min_val) * 255).astype(np.uint8),
-                    255
-                )
-                results['enhanced'] = enhanced
-            else:
-                results['enhanced'] = results['grayscale']
-        else:
-            results['enhanced'] = results['grayscale']
-    else:
-        results['enhanced'] = results['grayscale']
-    
-    # Analysis
-    total_pixels = final_mask.size
-    cancellation_pixels = np.sum(final_mask)
-    coverage_percentage = (cancellation_pixels / total_pixels) * 100
-    
-    analysis = {
-        'coverage_percentage': coverage_percentage,
-        'total_pixels': total_pixels,
-        'cancellation_pixels': cancellation_pixels,
-        'cancellation_color': cancellation_color,
-        'color_threshold_used': color_threshold,
-        'saturation_threshold_used': saturation_threshold,
-        'avg_cancellation_brightness': np.mean(gray[final_mask]) if np.any(final_mask) else 0
-    }
-    
-    return results, mask_uint8, analysis
+    # Always use RGB-only method to avoid HSV conversion issues
+    print(f"DEBUG: Using RGB-only extraction for {cancellation_color}")
+    return extract_colored_cancellation_rgb_only(img_array, cancellation_color, color_threshold)
 
-def extract_colored_cancellation_rgb_only(img_array, cancellation_color='red', color_threshold=40):
+def extract_black_stamp_background(img_array, black_threshold=60):
+    """
+    Extract the black stamp design, leaving non-black areas (like red cancellations) visible.
+    This is especially useful for Penny Blacks where we want to isolate red cancellations.
+    """
+    print(f"DEBUG: Extracting black background with threshold {black_threshold}")
+    
+    # Calculate brightness for each pixel
+    if len(img_array.shape) == 3:
+        brightness = np.mean(img_array, axis=2)
+    else:
+        brightness = img_array
+    
+    # Create mask for black areas
+    black_mask = brightness < black_threshold
+    
+    # Create result where black areas become white, preserving other colors
+    if len(img_array.shape) == 3:
+        result = img_array.copy()
+        result[black_mask] = [255, 255, 255]  # Make black areas white
+    else:
+        result = np.where(black_mask, 255, img_array)
+    
+    print(f"DEBUG: Removed {np.sum(black_mask)} black pixels ({np.sum(black_mask)/black_mask.size*100:.1f}%)")
+    
+    return result, black_mask
+
+def extract_colored_cancellation_rgb_only(img_array, cancellation_color='red', color_threshold=40, dark_background_mode=True, strictness=15, black_subtraction=True):
     """
     RGB-only fallback method for colored cancellation extraction.
     
     This method avoids HSV conversion issues by using only RGB channel analysis.
     """
     print(f"DEBUG: Using RGB-only extraction for {cancellation_color}")
+    print(f"DEBUG: Input array dtype: {img_array.dtype}, shape: {img_array.shape}")
     
-    # Ensure proper data type
+    # Validate input array
+    if img_array is None or img_array.size == 0:
+        print("ERROR: Empty or None input array")
+        return None, None, None
+    
+    if len(img_array.shape) != 3 or img_array.shape[2] != 3:
+        print(f"ERROR: Invalid array shape {img_array.shape}, expected (height, width, 3)")
+        return None, None, None
+    
+    if img_array.shape[0] < 1 or img_array.shape[1] < 1:
+        print(f"ERROR: Array too small: {img_array.shape}")
+        return None, None, None
+    
+    # Robust data type handling
     if img_array.dtype != np.uint8:
-        img_array = img_array.astype(np.uint8)
+        print(f"DEBUG: Converting from {img_array.dtype} to uint8")
+        if img_array.dtype in [np.uint16, np.int16, np.int32, np.int64]:
+            # Scale down from higher bit depths
+            if img_array.max() > 255:
+                img_array = (img_array.astype(np.float64) / img_array.max() * 255).astype(np.uint8)
+            else:
+                img_array = img_array.astype(np.uint8)
+        elif img_array.dtype in [np.float32, np.float64]:
+            # Handle float arrays (may be 0-1 or 0-255 range)
+            if img_array.max() <= 1.0:
+                img_array = (img_array * 255).astype(np.uint8)
+            else:
+                img_array = np.clip(img_array, 0, 255).astype(np.uint8)
+        else:
+            # Fallback for any other types
+            img_array = np.clip(img_array.astype(np.float64), 0, 255).astype(np.uint8)
+    
+    # Ensure values are in valid range
     img_array = np.clip(img_array, 0, 255)
+    print(f"DEBUG: Final array dtype: {img_array.dtype}, range: {img_array.min()}-{img_array.max()}")
     
     red = img_array[:, :, 0].astype(np.float32)
     green = img_array[:, :, 1].astype(np.float32)
     blue = img_array[:, :, 2].astype(np.float32)
     
-    # RGB-based color detection
+    # Enhanced RGB-based color detection with dark background handling
     if cancellation_color == 'red':
-        # Red should dominate over green and blue
-        color_mask = (red > green + color_threshold) & (red > blue + color_threshold)
-        # Also ensure red is reasonably strong
-        color_mask = color_mask & (red > 100)
+        # Special case: If this is a black stamp (like Penny Black) with red cancellation,
+        # ANY red tint should be considered cancellation since the stamp has no red design
+        overall_brightness = (red + green + blue) / 3
+        is_black_stamp = np.mean(overall_brightness) < 100  # Very dark stamp overall
+        
+        if is_black_stamp and black_subtraction:
+            print("DEBUG: Detected black stamp (like Penny Black) - using black subtraction approach")
+            
+            # Step 1: Remove the black stamp design first
+            black_threshold_for_removal = min(80, 50 + color_threshold)  # Adjust based on sensitivity
+            img_without_black, removed_black_mask = extract_black_stamp_background(img_array, black_threshold_for_removal)
+            
+            # Step 2: Now detect red in the remaining image (which should mostly be red cancellation)
+            red_remaining = img_without_black[:, :, 0].astype(np.float32)
+            green_remaining = img_without_black[:, :, 1].astype(np.float32)
+            blue_remaining = img_without_black[:, :, 2].astype(np.float32)
+            
+            # In the remaining image, look for any red tint (since black stamp is removed)
+            # This should be much cleaner now
+            non_white_mask = (red_remaining < 250) | (green_remaining < 250) | (blue_remaining < 250)
+            red_bias = (red_remaining > green_remaining + 5) & (red_remaining > blue_remaining + 5)
+            
+            # Combine: non-white areas that have red bias
+            color_mask = non_white_mask & red_bias
+            
+            print(f"DEBUG: After black removal, found {np.sum(color_mask)} red pixels")
+            
+        elif is_black_stamp:
+            print("DEBUG: Detected black stamp - using direct red detection (no black subtraction)")
+            # Fall back to the previous direct detection method
+            # Calculate background red level
+            background_red = np.percentile(red, 50)
+            background_green = np.percentile(green, 50) 
+            background_blue = np.percentile(blue, 50)
+            
+            print(f"DEBUG: Background levels - R:{background_red:.1f}, G:{background_green:.1f}, B:{background_blue:.1f}")
+            
+            # Look for pixels significantly redder than background
+            red_enhancement_threshold = max(8, color_threshold // 3)
+            red_enhanced = red > (background_red + red_enhancement_threshold)
+            
+            # Also ensure red is dominant
+            red_dominance = (red > green + 3) & (red > blue + 3)
+            
+            # Combine
+            color_mask = red_enhanced & red_dominance
+            
+            print(f"DEBUG: Direct detection found {np.sum(color_mask)} pixels")
+            
+        else:
+            # Method 1: Traditional dominance for bright areas (colored stamps)
+            bright_mask = red > 100
+            dominance_mask = (red > green + color_threshold) & (red > blue + color_threshold)
+            traditional_red = bright_mask & dominance_mask
+            
+            if dark_background_mode:
+                # Method 2: Enhanced detection for dark backgrounds (colored stamps)
+                dark_areas = overall_brightness < 80  # Very dark areas
+                
+                # In dark areas, look for any red bias, even if subtle
+                red_bias_threshold = max(5, color_threshold // 4)  # Much more sensitive
+                red_tint = (red > green + red_bias_threshold) & (red > blue + red_bias_threshold)
+                
+                # Additional check: red should be the strongest channel in dark areas
+                red_strongest_dark = (red >= green) & (red >= blue)
+                
+                # For dark areas, combine red tint with red being strongest channel
+                dark_red = dark_areas & red_tint & red_strongest_dark
+                
+                # Method 3: Relative red enhancement detection
+                if overall_brightness.max() > 0:
+                    red_ratio = red / (overall_brightness + 1)
+                    enhanced_red_areas = red_ratio > 1.1
+                    moderate_dark = (overall_brightness < 120) & (overall_brightness > 30)
+                    relative_red = moderate_dark & enhanced_red_areas
+                else:
+                    relative_red = np.zeros_like(red, dtype=bool)
+                
+                # Combine all detection methods
+                color_mask = traditional_red | dark_red | relative_red
+                print(f"DEBUG: Red detection - Traditional: {np.sum(traditional_red)}, Dark: {np.sum(dark_red)}, Relative: {np.sum(relative_red)}")
+            else:
+                # Standard detection only
+                color_mask = traditional_red
+                print(f"DEBUG: Red detection - Traditional only: {np.sum(traditional_red)}")
+        
+        # For black stamps (Penny Black), skip aggressive filtering since any red is cancellation
+        if is_black_stamp:
+            print("DEBUG: Skipping strict filtering for black stamp - any red is cancellation")
+            # Just do basic cleanup
+            try:
+                import cv2
+                mask_uint8 = (color_mask * 255).astype(np.uint8)
+                kernel_small = np.ones((2,2), np.uint8)
+                # Just remove single pixel noise
+                mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel_small)
+                color_mask = mask_uint8 > 0
+            except ImportError:
+                pass  # Use original mask if no cv2
+        elif np.any(color_mask):
+            # Import cv2 for advanced morphological operations (colored stamps only)
+            try:
+                import cv2
+            except ImportError:
+                print("WARNING: OpenCV not available, skipping advanced filtering")
+                color_mask = color_mask  # Use unfiltered mask
+            else:
+                # Apply morphological operations to clean up the mask
+                kernel_small = np.ones((3,3), np.uint8)
+                
+                # Convert to uint8 for morphological operations
+                mask_uint8 = (color_mask * 255).astype(np.uint8)
+                
+                # Close small gaps in cancellation lines
+                mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel_small)
+                
+                # Remove isolated small spots (likely stamp noise, not cancellation)
+                mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel_small)
+                
+                # Additional filtering: Remove very large connected areas
+                # (cancellations are usually lines/text, not large solid areas)
+                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_uint8, connectivity=8)
+                
+                filtered_mask = np.zeros_like(mask_uint8)
+                total_image_area = mask_uint8.shape[0] * mask_uint8.shape[1]
+                
+                for i in range(1, num_labels):  # Skip background (label 0)
+                    area = stats[i, cv2.CC_STAT_AREA]
+                    # Remove components that are too large (likely stamp design, not cancellation)
+                    # or too small (likely noise)
+                    if 10 < area < (total_image_area * 0.15):  # Between 10 pixels and 15% of image
+                        filtered_mask[labels == i] = 255
+                
+                color_mask = filtered_mask > 0
     elif cancellation_color == 'blue':
         # Blue should dominate over red and green  
         color_mask = (blue > red + color_threshold) & (blue > green + color_threshold)
@@ -323,19 +407,36 @@ def extract_colored_cancellation_rgb_only(img_array, cancellation_color='red', c
     results = {}
     gray = np.mean(img_array, axis=2).astype(np.uint8)
     
+    # If we used black subtraction on a black stamp, save the intermediate result
+    if is_black_stamp and black_subtraction and 'img_without_black' in locals():
+        results['black_removed'] = img_without_black.astype(np.uint8)
+    
     # 1. Pure colored cancellation on white
     results['pure_colored'] = np.where(final_mask, 0, 255).astype(np.uint8)
     
     # 2. Preserve original colors of the cancellation
-    color_preserved = np.where(
-        np.stack([final_mask, final_mask, final_mask], axis=2),
-        img_array,
-        [255, 255, 255]
-    )
-    results['color_preserved'] = color_preserved
+    try:
+        color_preserved = np.where(
+            np.stack([final_mask, final_mask, final_mask], axis=2),
+            img_array,
+            [255, 255, 255]
+        )
+        # Ensure PIL-compatible dtype
+        if color_preserved.dtype != np.uint8:
+            color_preserved = color_preserved.astype(np.uint8)
+        results['color_preserved'] = color_preserved
+    except Exception as e:
+        print(f"WARNING: Could not create color-preserved result: {e}")
+        # Fallback: create white image with same dimensions
+        results['color_preserved'] = np.full_like(img_array, 255, dtype=np.uint8)
     
     # 3. Grayscale version
-    results['grayscale'] = np.where(final_mask, gray, 255)
+    try:
+        grayscale = np.where(final_mask, gray, 255)
+        results['grayscale'] = grayscale.astype(np.uint8)
+    except Exception as e:
+        print(f"WARNING: Could not create grayscale result: {e}")
+        results['grayscale'] = np.full((img_array.shape[0], img_array.shape[1]), 255, dtype=np.uint8)
     
     # 4. Enhanced contrast version
     if np.any(final_mask):
@@ -368,8 +469,9 @@ def extract_colored_cancellation_rgb_only(img_array, cancellation_color='red', c
         'cancellation_color': cancellation_color,
         'color_threshold_used': color_threshold,
         'saturation_threshold_used': 'N/A (RGB-only mode)',
-        'avg_cancellation_brightness': np.mean(gray[final_mask]) if np.any(final_mask) else 0,
-        'extraction_method': 'RGB-only fallback'
+        'avg_cancellation_brightness': np.mean(gray[final_mask]) if cancellation_pixels > 0 else 0,
+        'extraction_method': f'RGB-only with dark background mode: {dark_background_mode}',
+        'dark_background_mode': dark_background_mode
     }
     
     return results, mask_uint8, analysis
