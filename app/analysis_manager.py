@@ -2512,9 +2512,15 @@ class AnalysisManager:
                 except Exception as e:
                     progress.stop()
                     status_label.config(text="Error occurred")
+                    
+                    # Get detailed error information
+                    import traceback
+                    error_details = traceback.format_exc()
+                    print(f"DETAILED ERROR: {error_details}")
+                    
                     messagebox.showerror(
                         "Extraction Error",
-                        f"Failed to extract black ink:\\n\\n{str(e)}"
+                        f"Failed to extract ink:\\n\\n{str(e)}\\n\\nFull error details printed to terminal."
                     )
             
             ttk.Button(
