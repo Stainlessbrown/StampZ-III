@@ -2402,7 +2402,13 @@ class AnalysisManager:
                     except ImportError:
                         raise ImportError("OpenCV (cv2) is required for the Black Ink Extractor. Please install it with: pip install opencv-python")
                     
-                    gray = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
+                    # Convert PIL image to proper format for cv2
+                    img_for_cv2 = np.array(pil_image, dtype=np.uint8)
+                    if img_for_cv2.shape[2] == 3:  # RGB
+                        gray = cv2.cvtColor(img_for_cv2, cv2.COLOR_RGB2GRAY)
+                    else:
+                        gray = img_for_cv2[:, :, 0]  # Take first channel if not RGB
+                    
                     adaptive_mask = cv2.adaptiveThreshold(
                         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 3
                     )
