@@ -213,6 +213,10 @@ class StampZApp:
         """Delegate to settings manager."""
         return self.settings_manager.open_preferences()
         
+    def open_black_ink_extractor(self):
+        """Delegate to analysis manager."""
+        return self.analysis_manager.open_black_ink_extractor()
+        
     def open_database_viewer(self):
         """Open the database viewer window."""
         try:

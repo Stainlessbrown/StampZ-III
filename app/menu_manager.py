@@ -121,6 +121,12 @@ class MenuManager:
         self.color_menu.add_separator()
         
         self.color_menu.add_command(
+            label="Black Ink Extractor...", 
+            command=self.app.open_black_ink_extractor
+        )
+        self.color_menu.add_separator()
+        
+        self.color_menu.add_command(
             label="Export Analysis with Library Matches...", 
             command=self.app.export_with_library_matches
         )

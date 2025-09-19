@@ -13,6 +13,9 @@ import logging
 import pandas as pd
 from datetime import datetime
 from typing import TYPE_CHECKING
+from PIL import Image
+import numpy as np
+from pathlib import Path
 
 if TYPE_CHECKING:
     from .stampz_app import StampZApp
@@ -2123,4 +2126,349 @@ class AnalysisManager:
             messagebox.showerror(
                 "Dialog Error",
                 f"Failed to show data selection dialog:\\n\\n{str(e)}"
+            )
+    
+    def open_black_ink_extractor(self):
+        """Open the Black Ink Extractor for cancellation extraction."""
+        if not self.app.current_file:
+            messagebox.showwarning(
+                "No Image",
+                "Please open a stamp image first.\\n\\n"
+                "The Black Ink Extractor works best with colored stamps containing black cancellations."
+            )
+            return
+            
+        # Import the black ink extraction functionality
+        try:
+            from black_ink_extractor import extract_black_ink
+        except ImportError:
+            messagebox.showerror(
+                "Module Error",
+                "Black Ink Extractor module not found.\\n\\n"
+                "Please ensure 'black_ink_extractor.py' is in the StampZ directory."
+            )
+            return
+            
+        try:
+            # Create extraction dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Black Ink Extractor")
+            dialog.geometry("500x650")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Center dialog
+            dialog.update_idletasks()
+            screen_width = dialog.winfo_screenwidth()
+            screen_height = dialog.winfo_screenheight()
+            x = (screen_width // 2) - (dialog.winfo_reqwidth() // 2)
+            y = (screen_height // 2) - (dialog.winfo_reqheight() // 2)
+            dialog.geometry(f"+{x}+{y}")
+            
+            # Header
+            header_frame = ttk.Frame(dialog)
+            header_frame.pack(fill="x", padx=20, pady=10)
+            
+            ttk.Label(
+                header_frame,
+                text="Black Ink Cancellation Extractor",
+                font=("Arial", 14, "bold")
+            ).pack()
+            
+            ttk.Label(
+                header_frame,
+                text=f"Current Image: {os.path.basename(self.app.current_file)}",
+                font=("Arial", 10)
+            ).pack(pady=5)
+            
+            # Description
+            desc_frame = ttk.Frame(dialog)
+            desc_frame.pack(fill="x", padx=20, pady=10)
+            
+            description = (
+                "This tool extracts black cancellation ink from colored stamps, \n"
+                "creating clean cancellation images on white backgrounds.\n\n"
+                "Works best with:\n"
+                "• Light to medium colored stamps\n"
+                "• Good contrast between black cancellation and stamp colors\n"
+                "• 48-bit TIFF files from VueScan (but works with all formats)"
+            )
+            
+            ttk.Label(
+                desc_frame,
+                text=description,
+                font=("Arial", 9),
+                justify="left"
+            ).pack(anchor="w")
+            
+            # Settings frame
+            settings_frame = ttk.LabelFrame(dialog, text="Extraction Settings", padding=10)
+            settings_frame.pack(fill="x", padx=20, pady=10)
+            
+            # Black threshold setting
+            ttk.Label(settings_frame, text="Black Threshold (0-255):").grid(row=0, column=0, sticky="w", pady=2)
+            black_threshold = tk.IntVar(value=60)
+            black_threshold_scale = ttk.Scale(
+                settings_frame,
+                from_=10, to=150,
+                variable=black_threshold,
+                orient="horizontal",
+                length=200
+            )
+            black_threshold_scale.grid(row=0, column=1, padx=10, pady=2)
+            black_threshold_label = ttk.Label(settings_frame, text="60")
+            black_threshold_label.grid(row=0, column=2, pady=2)
+            
+            def update_black_threshold(event):
+                black_threshold_label.config(text=str(int(black_threshold.get())))
+            black_threshold_scale.bind("<Motion>", update_black_threshold)
+            
+            # Saturation threshold setting
+            ttk.Label(settings_frame, text="Saturation Threshold (0-255):").grid(row=1, column=0, sticky="w", pady=2)
+            saturation_threshold = tk.IntVar(value=30)
+            saturation_threshold_scale = ttk.Scale(
+                settings_frame,
+                from_=10, to=100,
+                variable=saturation_threshold,
+                orient="horizontal",
+                length=200
+            )
+            saturation_threshold_scale.grid(row=1, column=1, padx=10, pady=2)
+            saturation_threshold_label = ttk.Label(settings_frame, text="30")
+            saturation_threshold_label.grid(row=1, column=2, pady=2)
+            
+            def update_saturation_threshold(event):
+                saturation_threshold_label.config(text=str(int(saturation_threshold.get())))
+            saturation_threshold_scale.bind("<Motion>", update_saturation_threshold)
+            
+            # Red offset setting
+            ttk.Label(settings_frame, text="Red Channel Offset:").grid(row=2, column=0, sticky="w", pady=2)
+            red_offset = tk.IntVar(value=40)
+            red_offset_scale = ttk.Scale(
+                settings_frame,
+                from_=10, to=100,
+                variable=red_offset,
+                orient="horizontal",
+                length=200
+            )
+            red_offset_scale.grid(row=2, column=1, padx=10, pady=2)
+            red_offset_label = ttk.Label(settings_frame, text="40")
+            red_offset_label.grid(row=2, column=2, pady=2)
+            
+            def update_red_offset(event):
+                red_offset_label.config(text=str(int(red_offset.get())))
+            red_offset_scale.bind("<Motion>", update_red_offset)
+            
+            # Output settings
+            output_frame = ttk.LabelFrame(dialog, text="Output Options", padding=10)
+            output_frame.pack(fill="x", padx=20, pady=10)
+            
+            open_results = tk.BooleanVar(value=True)
+            ttk.Checkbutton(
+                output_frame,
+                text="Open results automatically",
+                variable=open_results
+            ).pack(anchor="w")
+            
+            save_to_stampz = tk.BooleanVar(value=True)
+            ttk.Checkbutton(
+                output_frame,
+                text="Load best result back into StampZ",
+                variable=save_to_stampz
+            ).pack(anchor="w")
+            
+            # Progress and status
+            status_frame = ttk.Frame(dialog)
+            status_frame.pack(fill="x", padx=20, pady=10)
+            
+            progress = ttk.Progressbar(status_frame, mode='indeterminate')
+            progress.pack(fill="x", pady=5)
+            
+            status_label = ttk.Label(status_frame, text="Ready to extract...")
+            status_label.pack()
+            
+            # Buttons
+            button_frame = ttk.Frame(dialog)
+            button_frame.pack(fill="x", padx=20, pady=20)
+            
+            def extract_cancellation():
+                """Perform the black ink extraction."""
+                try:
+                    # Update UI
+                    status_label.config(text="Loading image...")
+                    progress.start()
+                    dialog.update()
+                    
+                    # Load image using PIL
+                    pil_image = Image.open(self.app.current_file)
+                    if pil_image.mode != 'RGB':
+                        pil_image = pil_image.convert('RGB')
+                    img_array = np.array(pil_image)
+                    
+                    status_label.config(text="Extracting black ink...")
+                    dialog.update()
+                    
+                    # Extract black ink
+                    results, mask, analysis = extract_black_ink(
+                        img_array,
+                        black_threshold=int(black_threshold.get()),
+                        saturation_threshold=int(saturation_threshold.get()),
+                        red_offset=int(red_offset.get())
+                    )
+                    
+                    status_label.config(text="Saving results...")
+                    dialog.update()
+                    
+                    # Create output directory
+                    image_path = Path(self.app.current_file)
+                    output_dir = image_path.parent / "black_ink_extraction"
+                    output_dir.mkdir(exist_ok=True)
+                    base_name = image_path.stem
+                    
+                    # Save results (streamlined - only essential files)
+                    saved_files = []
+                    
+                    # Save only the most useful extraction results
+                    best_result_path = None
+                    
+                    # 1. Pure black cancellation (main result)
+                    pure_black_path = output_dir / f"{base_name}_pure_black_cancellation.png"
+                    Image.fromarray(results['pure_black']).save(pure_black_path)
+                    saved_files.append(pure_black_path)
+                    best_result_path = pure_black_path
+                    
+                    # 2. Grayscale version (preserves ink density)
+                    grayscale_path = output_dir / f"{base_name}_grayscale_cancellation.png"
+                    Image.fromarray(results['grayscale']).save(grayscale_path)
+                    saved_files.append(grayscale_path)
+                    
+                    # 3. Create and save adaptive mask (the one you mentioned wanting)
+                    # This shows the detection method that works well
+                    import cv2
+                    gray = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
+                    adaptive_mask = cv2.adaptiveThreshold(
+                        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 3
+                    )
+                    adaptive_path = output_dir / f"{base_name}_mask_adaptive.png"
+                    Image.fromarray(adaptive_mask).save(adaptive_path)
+                    saved_files.append(adaptive_path)
+                    
+                    # 4. Save original for reference (smaller file)
+                    original_path = output_dir / f"{base_name}_original.png"
+                    # Save at reduced quality to save space
+                    pil_image.save(original_path, optimize=True, quality=85)
+                    saved_files.append(original_path)
+                    
+                    # Save analysis report
+                    report_path = output_dir / f"{base_name}_analysis.txt"
+                    with open(report_path, 'w') as f:
+                        f.write(f"Black Ink Extraction Report\\n")
+                        f.write(f"Image: {image_path.name}\\n")
+                        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n")
+                        f.write(f"Coverage: {analysis['coverage_percentage']:.1f}%\\n")
+                        f.write(f"Black ink pixels: {analysis['cancellation_pixels']:,}\\n")
+                        f.write(f"Total pixels: {analysis['total_pixels']:,}\\n\\n")
+                        f.write(f"Settings used:\\n")
+                        f.write(f"  Black threshold: {int(black_threshold.get())}\\n")
+                        f.write(f"  Saturation threshold: {int(saturation_threshold.get())}\\n")
+                        f.write(f"  Red offset: {int(red_offset.get())}\\n")
+                    saved_files.append(report_path)
+                    
+                    progress.stop()
+                    status_label.config(text="Extraction complete!")
+                    
+                    # Load best result back into StampZ if requested
+                    if save_to_stampz.get() and best_result_path:
+                        try:
+                            from utils.image_processor import load_image
+                            new_image, new_metadata = load_image(str(best_result_path))
+                            self.app.canvas.load_image(new_image)
+                            self.app.current_file = str(best_result_path)
+                            self.app.current_image_metadata = new_metadata
+                            self.app.root.title(f"StampZ - {best_result_path.name}")
+                            self.app.control_panel.update_current_filename(str(best_result_path))
+                        except Exception as load_error:
+                            print(f"Warning: Could not load result back into StampZ: {load_error}")
+                    
+                    # Show success dialog
+                    success_dialog = tk.Toplevel(dialog)
+                    success_dialog.title("Extraction Complete")
+                    success_dialog.geometry("400x300")
+                    success_dialog.transient(dialog)
+                    success_dialog.grab_set()
+                    
+                    # Center success dialog
+                    success_dialog.update_idletasks()
+                    x = (screen_width // 2) - (success_dialog.winfo_reqwidth() // 2)
+                    y = (screen_height // 2) - (success_dialog.winfo_reqheight() // 2)
+                    success_dialog.geometry(f"+{x}+{y}")
+                    
+                    success_text = (
+                        f"✅ Black ink extraction completed successfully!\\n\\n"
+                        f"Coverage: {analysis['coverage_percentage']:.1f}% of image\\n"
+                        f"Black ink pixels: {analysis['cancellation_pixels']:,}\\n\\n"
+                        f"📁 Results saved to:\\n{output_dir.name}/\\n\\n"
+                        f"📋 Generated files ({len(saved_files)} total):\\n"
+                        f"• Pure black cancellation (loaded in StampZ)\\n"
+                        f"• Grayscale version (ink density preserved)\\n"
+                        f"• Adaptive detection mask\\n"
+                        f"• Original image (for comparison)\\n"
+                        f"• Analysis report with settings"
+                    )
+                    
+                    ttk.Label(
+                        success_dialog,
+                        text=success_text,
+                        font=("Arial", 10),
+                        justify="left"
+                    ).pack(padx=20, pady=20)
+                    
+                    success_button_frame = ttk.Frame(success_dialog)
+                    success_button_frame.pack(pady=10)
+                    
+                    def open_results_folder():
+                        import subprocess
+                        subprocess.run(['open', str(output_dir)])
+                    
+                    ttk.Button(
+                        success_button_frame,
+                        text="Open Results Folder",
+                        command=open_results_folder
+                    ).pack(side="left", padx=5)
+                    
+                    ttk.Button(
+                        success_button_frame,
+                        text="Close",
+                        command=lambda: [success_dialog.destroy(), dialog.destroy()]
+                    ).pack(side="right", padx=5)
+                    
+                    # Open results folder automatically if requested
+                    if open_results.get():
+                        open_results_folder()
+                    
+                except Exception as e:
+                    progress.stop()
+                    status_label.config(text="Error occurred")
+                    messagebox.showerror(
+                        "Extraction Error",
+                        f"Failed to extract black ink:\\n\\n{str(e)}"
+                    )
+            
+            ttk.Button(
+                button_frame,
+                text="Extract Black Ink",
+                command=extract_cancellation,
+                style="Accent.TButton"
+            ).pack(side="left", padx=5)
+            
+            ttk.Button(
+                button_frame,
+                text="Cancel",
+                command=dialog.destroy
+            ).pack(side="right", padx=5)
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Black Ink Extractor Error",
+                f"Failed to open Black Ink Extractor:\\n\\n{str(e)}"
             )

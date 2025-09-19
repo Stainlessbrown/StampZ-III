@@ -27,7 +27,7 @@ class SettingsManager:
         try:
             from __init__ import __version__, __app_name__, __description__
         except ImportError:
-            __version__ = "3.0.2"
+            __version__ = "3.0.3"
             __app_name__ = "StampZ_III"
             __description__ = "Image analysis and color analysis tool"
         
@@ -38,6 +38,7 @@ class SettingsManager:
             "Features:\\n"
             "• Image cropping with polygon selection\\n"
             "• Color analysis and measurement\\n"
+            "• Black Ink Extractor for cancellation isolation\\n"
             "• Compare mode for color averaging\\n"
             "• Export to ODS, XLSX, and CSV formats\\n"
             "• Color library management\\n"
