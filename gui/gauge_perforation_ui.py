@@ -385,11 +385,8 @@ class GaugePerforationDialog:
         
         try:
             # Create gauge overlay for the full-size image
-            # Account for display scaling when calculating gauge DPI
             img_width, img_height = self.base_image.size
-            effective_dpi = int(self.gauge_system.dpi * self.scale_factor)
-            scaled_gauge_system = FinalPerforationGauge(dpi=effective_dpi)
-            overlay = scaled_gauge_system.create_gauge_overlay(img_width, img_height)
+            overlay = self.gauge_system.create_gauge_overlay(img_width, img_height)
             
             # Rotate if vertical orientation
             if self.orientation_var.get() == 'vertical':
