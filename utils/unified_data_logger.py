@@ -190,15 +190,33 @@ class UnifiedDataLogger:
             return None
         
     def log_perforation_analysis(self, perf_data):
-        """Log perforation analysis data (for future implementation)."""
+        """Log comprehensive perforation analysis data from gauge measurements."""
+        # Core perforation information
         data = {
             "Perforation Type": perf_data.get('perf_type', 'Unknown'),
-            "Gauge": perf_data.get('gauge', 'Not measured'),
-            "Regularity": perf_data.get('regularity', 'Not analyzed'),
-            "Notes": perf_data.get('notes', 'None')
+            "Catalog Format": perf_data.get('catalog_format', 'Not measured'),
+            "Gauge Measurement": perf_data.get('gauge', 'Not measured'),
         }
         
-        return self.log_section("Perforation Analysis", data)
+        # Detailed measurements if available
+        horizontal = perf_data.get('horizontal_gauge')
+        vertical = perf_data.get('vertical_gauge')
+        
+        if horizontal and horizontal != "Not measured":
+            data["Horizontal Gauge"] = f"{horizontal}"
+            
+        if vertical and vertical != "Not measured":
+            data["Vertical Gauge"] = f"{vertical}"
+        
+        # Technical details
+        data["Measurement Method"] = perf_data.get('measurement_method', 'Unknown')
+        data["Measurement Tool"] = perf_data.get('measurement_tool', 'Unknown')
+        data["DPI Used"] = perf_data.get('dpi_used', 'Unknown')
+        data["Color Scheme"] = perf_data.get('color_scheme', 'Default')
+        data["Regularity Assessment"] = perf_data.get('regularity', 'Not analyzed')
+        data["Notes"] = perf_data.get('notes', 'None')
+        
+        return self.log_section("Gauge Perforation Analysis", data)
         
     def get_data_file_path(self):
         """Return the path to the unified data file."""
