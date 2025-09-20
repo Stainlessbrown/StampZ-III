@@ -57,8 +57,7 @@ class FinalPerforationGauge:
                 break
                 
             # Calculate dot spacing (20mm perforation standard)
-            # Apply calibration factor based on real-world measurements (14 gauge should read as 14, not 15.5)
-            spacing_pixels = (20.0 / gauge) * self.pixels_per_mm * 0.903
+            spacing_pixels = (20.0 / gauge) * self.pixels_per_mm
             
             # Create dots for this gauge
             dots = []

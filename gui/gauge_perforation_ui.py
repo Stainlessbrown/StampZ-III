@@ -179,7 +179,7 @@ class GaugePerforationDialog:
         )
         
         # Auto-fit checkbox
-        self.auto_fit_var = tk.BooleanVar(value=True)  # Default to auto-fit
+        self.auto_fit_var = tk.BooleanVar(value=False)  # Disable auto-fit by default to avoid scaling issues
         self.auto_fit_check = ttk.Checkbutton(
             self.file_frame,
             text="Auto-fit on resize",
