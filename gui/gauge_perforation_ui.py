@@ -49,7 +49,7 @@ class GaugePerforationDialog:
         
         # Create the dialog window
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("StampZ - Gauge Perforation Measurement")
+        self.dialog.title("StampZ - Gauge Perforation Measurement [TEST BUILD]")
         self.dialog.geometry("1200x800")
         self.dialog.resizable(True, True)
         
