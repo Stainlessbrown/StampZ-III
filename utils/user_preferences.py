@@ -54,6 +54,14 @@ class CompareModePreferences:
     auto_save_averages: bool = False  # Automatically save averages to database
 
 
+@dataclass
+class MeasurementPreferences:
+    """Preferences for measurement features (perforation, centering, etc.)."""
+    default_dpi: int = 600  # Default DPI for measurements
+    perforation_measurement_enabled: bool = True  # Enable perforation measurement feature
+    default_background_color: str = 'black'  # Default scan background color
+
+
 # InterfacePreferences class removed - complexity levels no longer used
 @dataclass 
 class UserPreferences:
@@ -63,6 +71,7 @@ class UserPreferences:
     color_library_prefs: ColorLibraryPreferences
     sample_area_prefs: SampleAreaPreferences
     compare_mode_prefs: CompareModePreferences
+    measurement_prefs: MeasurementPreferences
     # interface_prefs removed - complexity levels no longer used
     
     def __init__(self):
@@ -71,6 +80,7 @@ class UserPreferences:
         self.color_library_prefs = ColorLibraryPreferences()
         self.sample_area_prefs = SampleAreaPreferences()
         self.compare_mode_prefs = CompareModePreferences()
+        self.measurement_prefs = MeasurementPreferences()
         # self.interface_prefs removed - complexity levels no longer used
 
 
@@ -463,6 +473,63 @@ class PreferencesManager:
             print(f"Error setting auto save averages preference: {e}")
             return False
     
+    def get_default_dpi(self) -> int:
+        """Get the default DPI setting for measurements."""
+        return self.preferences.measurement_prefs.default_dpi
+    
+    def set_default_dpi(self, dpi: int) -> bool:
+        """Set the default DPI setting for measurements.
+        
+        Args:
+            dpi: DPI value (typically 300, 600, 1200, etc.)
+        """
+        try:
+            if dpi < 72 or dpi > 2400:
+                raise ValueError("DPI must be between 72 and 2400")
+            
+            self.preferences.measurement_prefs.default_dpi = dpi
+            self.save_preferences()
+            return True
+        except Exception as e:
+            print(f"Error setting default DPI: {e}")
+            return False
+    
+    def get_perforation_measurement_enabled(self) -> bool:
+        """Get whether perforation measurement is enabled."""
+        return self.preferences.measurement_prefs.perforation_measurement_enabled
+    
+    def set_perforation_measurement_enabled(self, enabled: bool) -> bool:
+        """Set whether perforation measurement is enabled."""
+        try:
+            self.preferences.measurement_prefs.perforation_measurement_enabled = enabled
+            self.save_preferences()
+            return True
+        except Exception as e:
+            print(f"Error setting perforation measurement enabled: {e}")
+            return False
+    
+    def get_default_background_color(self) -> str:
+        """Get the default background color for measurements."""
+        return self.preferences.measurement_prefs.default_background_color
+    
+    def set_default_background_color(self, bg_color: str) -> bool:
+        """Set the default background color for measurements.
+        
+        Args:
+            bg_color: 'black', 'dark_gray', 'white', or 'light_gray'
+        """
+        try:
+            valid_colors = ['black', 'dark_gray', 'white', 'light_gray']
+            if bg_color not in valid_colors:
+                raise ValueError(f"Background color must be one of: {valid_colors}")
+            
+            self.preferences.measurement_prefs.default_background_color = bg_color
+            self.save_preferences()
+            return True
+        except Exception as e:
+            print(f"Error setting default background color: {e}")
+            return False
+    
     def get_export_filename(self, sample_set_name: str = None, extension: str = ".ods") -> str:
         """Generate export filename based on preferences."""
         from datetime import datetime
@@ -547,6 +614,15 @@ class PreferencesManager:
                         auto_save_averages=compare_data.get('auto_save_averages', False)
                     )
                 
+                # Load measurement preferences
+                if 'measurement_prefs' in data:
+                    measurement_data = data['measurement_prefs']
+                    self.preferences.measurement_prefs = MeasurementPreferences(
+                        default_dpi=measurement_data.get('default_dpi', 600),
+                        perforation_measurement_enabled=measurement_data.get('perforation_measurement_enabled', True),
+                        default_background_color=measurement_data.get('default_background_color', 'black')
+                    )
+                
                 # Interface preferences removed - complexity levels no longer used
                 
                 print(f"Loaded preferences from {self.prefs_file}")
@@ -581,6 +657,7 @@ class PreferencesManager:
                 'color_library_prefs': asdict(self.preferences.color_library_prefs),
                 'sample_area_prefs': asdict(self.preferences.sample_area_prefs),
                 'compare_mode_prefs': asdict(self.preferences.compare_mode_prefs),
+                'measurement_prefs': asdict(self.preferences.measurement_prefs),
                 # 'interface_prefs': removed - complexity levels no longer used
             })
             

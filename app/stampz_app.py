@@ -157,6 +157,7 @@ class StampZApp:
         self.root.bind('<Control-r>', lambda e: self.reset_view())
         self.root.bind('<Escape>', lambda e: self.reset_view())
         self.root.bind('<F11>', lambda e: self.fit_to_window())
+        self.root.bind('<Control-p>', lambda e: self.measure_perforations())
         self.root.bind('<plus>', lambda e: self._adjust_vertex_count(1))
         self.root.bind('<minus>', lambda e: self._adjust_vertex_count(-1))
 
@@ -220,6 +221,53 @@ class StampZApp:
     def open_precision_measurements(self):
         """Delegate to analysis manager."""
         return self.analysis_manager.open_precision_measurements()
+        
+    # Measurement Methods
+    def measure_perforations(self):
+        """Launch perforation measurement dialog."""
+        if hasattr(self.analysis_manager, 'measurement_manager') and self.analysis_manager.measurement_manager:
+            return self.analysis_manager.measurement_manager.measure_perforations()
+        else:
+            # Fallback - direct method call
+            try:
+                from gui.perforation_ui import PerforationMeasurementDialog
+                import numpy as np
+                import cv2
+                
+                # Get image data
+                image_array = None
+                image_filename = ""
+                
+                if hasattr(self, 'canvas') and self.canvas.original_image:
+                    from PIL import Image
+                    pil_image = self.canvas.original_image
+                    image_array = np.array(pil_image)
+                    if len(image_array.shape) == 3:
+                        image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                    
+                    if hasattr(self, 'current_file') and self.current_file:
+                        image_filename = self.current_file
+                
+                dialog = PerforationMeasurementDialog(
+                    parent=self.root,
+                    image_array=image_array,
+                    image_filename=image_filename
+                )
+                
+            except ImportError as e:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Feature Not Available",
+                    f"Perforation measurement requires additional dependencies.\n"
+                    f"Please install: pip install opencv-python\n\n"
+                    f"Error: {str(e)}"
+                )
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Error",
+                    f"Failed to launch perforation measurement:\n{str(e)}"
+                )
         
     def export_individual_to_unified_logger(self):
         """Export individual color measurements to unified data logger."""

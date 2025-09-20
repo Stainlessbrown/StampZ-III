@@ -58,6 +58,14 @@ class AnalysisManager:
         except ImportError:
             logger.warning("DatabaseManager not available, using legacy methods")
             self.database_manager = None
+            
+        try:
+            # Measurement Manager (for perforation measurement, etc.)
+            from managers.measurement_manager import MeasurementManager
+            self.measurement_manager = MeasurementManager(self.app)
+        except ImportError:
+            logger.warning("MeasurementManager not available, using direct methods")
+            self.measurement_manager = None
         
     def analyze_colors(self):
         """Analyze colors from sample markers on the canvas."""

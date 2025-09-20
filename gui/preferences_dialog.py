@@ -123,6 +123,9 @@ class PreferencesDialog:
         # Compare mode preferences tab
         self._create_compare_mode_tab(notebook)
         
+        # Measurement preferences tab
+        self._create_measurement_tab(notebook)
+        
         # Future tabs can be added here
         # self._create_general_tab(notebook)
         # self._create_appearance_tab(notebook)
@@ -629,6 +632,121 @@ class PreferencesDialog:
             font=("TkDefaultFont", 9)
         ).pack(anchor=tk.W)
     
+    def _create_measurement_tab(self, notebook):
+        """Create the measurement preferences tab."""
+        measurement_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(measurement_frame, text="Measurements")
+        
+        # DPI Settings section
+        dpi_frame = ttk.LabelFrame(measurement_frame, text="Image DPI Settings", padding="10")
+        dpi_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(
+            dpi_frame,
+            text="Default DPI for measurements:",
+            font=("TkDefaultFont", 10, "bold")
+        ).pack(anchor=tk.W, pady=(0, 10))
+        
+        # DPI selection
+        dpi_control_frame = ttk.Frame(dpi_frame)
+        dpi_control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(dpi_control_frame, text="DPI:", width=8).pack(side=tk.LEFT)
+        
+        self.default_dpi_var = tk.StringVar()
+        dpi_combo = ttk.Combobox(
+            dpi_control_frame,
+            textvariable=self.default_dpi_var,
+            values=['150', '300', '600', '1200', '2400'],
+            state='normal',
+            width=10
+        )
+        dpi_combo.pack(side=tk.LEFT, padx=(5, 10))
+        
+        ttk.Label(
+            dpi_control_frame, 
+            text="(or enter custom value)",
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        ).pack(side=tk.LEFT)
+        
+        # DPI explanation
+        dpi_explanation = (
+            "DPI (Dots Per Inch) is crucial for accurate measurements. This setting will be used as the "
+            "default for all measurement features:\n\n"
+            "• Perforation Gauge Measurement\n"
+            "• Precision Color Measurements\n"
+            "• Future measurement tools\n\n"
+            "Common DPI values:\n"
+            "• 150 DPI: Basic scans, less precise measurements\n"
+            "• 300 DPI: Standard document scans\n"
+            "• 600 DPI: High-quality stamp scans (recommended)\n"
+            "• 1200 DPI: Professional archival scans\n"
+            "• 2400 DPI: Ultra high-resolution scans\n\n"
+            "You can still override this setting in individual measurement dialogs if needed."
+        )
+        
+        ttk.Label(
+            dpi_frame,
+            text=dpi_explanation,
+            wraplength=550,
+            justify=tk.LEFT,
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        ).pack(anchor=tk.W, pady=(10, 0))
+        
+        # Measurement Features section
+        features_frame = ttk.LabelFrame(measurement_frame, text="Measurement Features", padding="10")
+        features_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.perforation_enabled_var = tk.BooleanVar()
+        ttk.Checkbutton(
+            features_frame,
+            text="Enable Perforation Gauge Measurement",
+            variable=self.perforation_enabled_var
+        ).pack(anchor=tk.W, pady=(0, 10))
+        
+        # Default background color
+        bg_color_control_frame = ttk.Frame(features_frame)
+        bg_color_control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(bg_color_control_frame, text="Default scan background:", width=20).pack(side=tk.LEFT)
+        
+        self.default_bg_color_var = tk.StringVar()
+        bg_color_combo = ttk.Combobox(
+            bg_color_control_frame,
+            textvariable=self.default_bg_color_var,
+            values=['black', 'dark_gray', 'white', 'light_gray'],
+            state='readonly',
+            width=12
+        )
+        bg_color_combo.pack(side=tk.LEFT, padx=(5, 10))
+        
+        ttk.Label(
+            bg_color_control_frame,
+            text="(color of area around stamp in scans)",
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        ).pack(side=tk.LEFT)
+        
+        # Feature explanation
+        feature_explanation = (
+            "Perforation Gauge Measurement provides automated measurement of stamp perforation gauge "
+            "using computer vision techniques. The measurement uses the DPI setting above to calculate "
+            "accurate gauge values in standard catalog format (11, 11¼, 11½, 11¾, 12, etc.).\n\n"
+            "This feature requires OpenCV to be installed. If disabled, the Measurement menu will "
+            "only show Precision Measurements."
+        )
+        
+        ttk.Label(
+            features_frame,
+            text=feature_explanation,
+            wraplength=550,
+            justify=tk.LEFT,
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        ).pack(anchor=tk.W)
+    
     def _create_migration_tab(self, notebook):
         """Create the migration tab (only if migration is possible)."""
         try:
@@ -1000,6 +1118,11 @@ class PreferencesDialog:
         # Compare mode preferences
         self.auto_save_averages_var.set(self.prefs_manager.get_auto_save_averages())
         
+        # Measurement preferences
+        self.default_dpi_var.set(str(self.prefs_manager.get_default_dpi()))
+        self.perforation_enabled_var.set(self.prefs_manager.get_perforation_measurement_enabled())
+        self.default_bg_color_var.set(self.prefs_manager.get_default_background_color())
+        
         # Update preview
         self._update_filename_preview()
     
@@ -1122,6 +1245,17 @@ class PreferencesDialog:
             
             # Compare mode preferences
             self.prefs_manager.set_auto_save_averages(self.auto_save_averages_var.get())
+            
+            # Measurement preferences
+            try:
+                dpi = int(self.default_dpi_var.get())
+                self.prefs_manager.set_default_dpi(dpi)
+            except ValueError:
+                messagebox.showerror("Invalid DPI", "Please enter a valid DPI value (72-2400).")
+                return False
+            
+            self.prefs_manager.set_perforation_measurement_enabled(self.perforation_enabled_var.get())
+            self.prefs_manager.set_default_background_color(self.default_bg_color_var.get())
             
             # Save preferences
             success = self.prefs_manager.save_preferences()

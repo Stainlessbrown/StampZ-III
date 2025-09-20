@@ -27,6 +27,7 @@ class MenuManager:
         self._create_file_menu()
         self._create_edit_menu()
         self._create_color_menu()
+        self._create_measurement_menu()
         self._create_help_menu()
         
     def _create_file_menu(self):
@@ -124,10 +125,6 @@ class MenuManager:
             label="Black Ink Extractor...",
             command=self.app.open_black_ink_extractor
         )
-        self.color_menu.add_command(
-            label="Precision Measurements...",
-            command=self.app.open_precision_measurements
-        )
         self.color_menu.add_separator()
         
         # Note: Export to Unified Data Logger options have been moved to the Compare window
@@ -136,6 +133,23 @@ class MenuManager:
         self.color_menu.add_command(
             label="Export Analysis with Library Matches...", 
             command=self.app.export_with_library_matches
+        )
+        
+    def _create_measurement_menu(self):
+        """Create the Measurement menu."""
+        self.measurement_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Measurement", menu=self.measurement_menu)
+        
+        self.measurement_menu.add_command(
+            label="Perforation Gauge...",
+            command=self.app.measure_perforations,
+            accelerator="Ctrl+P"
+        )
+        self.measurement_menu.add_separator()
+        
+        self.measurement_menu.add_command(
+            label="Precision Measurements...",
+            command=self.app.open_precision_measurements
         )
         
     def _create_help_menu(self):

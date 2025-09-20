@@ -1,0 +1,18 @@
+=== StampZ Perforation Analysis ===
+Image: sample_stamp.jpg
+Analysis Date: 2025-09-20 07:38:05
+
+PERFORATION MEASUREMENT:
+Overall Gauge: 11¼
+Precise Measurement: 11.237
+Compound Perforation: No
+Measurement Quality: Excellent
+
+EDGE ANALYSIS:
+
+TECHNICAL NOTES:
+  • Analyzed 4 edges with 48 perforation holes
+  • Average measurement confidence: 94%
+  • DPI setting: 600
+
+--- End of Analysis ---
