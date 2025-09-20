@@ -171,12 +171,13 @@ class GaugePerforationDialog:
             text="📁 Load Image", 
             command=self._load_image
         )
-        self.fit_window_btn = ttk.Button(
-            self.file_frame,
-            text="🔍 Fit to Window",
-            command=self._fit_to_window,
-            state='disabled'
-        )
+        # Fit to window button disabled for testing
+        # self.fit_window_btn = ttk.Button(
+        #     self.file_frame,
+        #     text="🔍 Fit to Window", 
+        #     command=self._fit_to_window,
+        #     state='disabled'
+        # )
         
         # Auto-fit checkbox
         self.auto_fit_var = tk.BooleanVar(value=False)  # Disable auto-fit by default to avoid scaling issues
@@ -253,7 +254,7 @@ class GaugePerforationDialog:
         # File operations
         self.file_frame.pack(fill=tk.X, pady=5)
         self.load_image_btn.pack(fill=tk.X, pady=1)
-        self.fit_window_btn.pack(fill=tk.X, pady=1)
+        # self.fit_window_btn.pack(fill=tk.X, pady=1)  # Disabled for testing
         self.auto_fit_check.pack(fill=tk.X, pady=1)
         self.save_data_btn.pack(fill=tk.X, pady=1)
         
@@ -351,15 +352,13 @@ class GaugePerforationDialog:
             dpi = int(self.dpi_var.get()) if self.dpi_var.get().isdigit() else 800
             self.gauge_system = FinalPerforationGauge(dpi=dpi)
             
-            # Enable fit to window button
-            self.fit_window_btn.configure(state='normal')
+        # Enable fit to window button - disabled for testing
+        # self.fit_window_btn.configure(state='normal')
             
             # Set auto-fit enabled state
             self._auto_fit_enabled = self.auto_fit_var.get()
             
-            # Auto-fit if enabled (default behavior)
-            if self._auto_fit_enabled:
-                self.dialog.after(100, self._fit_to_window)  # Delay to ensure UI is ready
+        # Skip auto-fit for testing
             
             self.status_var.set(f"Image loaded - {img_width}x{img_height} pixels (scale: {self.scale_factor:.2f}x)")
             
