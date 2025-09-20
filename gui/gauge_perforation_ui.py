@@ -311,9 +311,10 @@ class GaugePerforationDialog:
             if image_array is None or image_array.size == 0:
                 return
                 
-            # Convert from BGR to RGB if needed
+            # Convert from BGR to RGB if needed (OpenCV uses BGR, PIL uses RGB)
             if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                display_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
+                # Assume BGR from OpenCV and convert to RGB for PIL
+                display_array = image_array[:, :, ::-1]  # Reverse channel order BGR->RGB
             else:
                 display_array = image_array
             
@@ -733,10 +734,20 @@ class GaugePerforationDialog:
         
         if filename:
             try:
-                image = cv2.imread(filename)
-                if image is None:
-                    messagebox.showerror("Error", "Could not load image file")
-                    return
+                # Load image with PIL and convert to numpy array
+                pil_image = Image.open(filename)
+                # Convert to RGB if needed
+                if pil_image.mode not in ['RGB', 'RGBA']:
+                    pil_image = pil_image.convert('RGB')
+                
+                # Convert PIL to numpy array (RGB format)
+                image_array = np.array(pil_image)
+                
+                # Convert RGB to BGR for compatibility with OpenCV-expecting code
+                if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+                    image = image_array[:, :, ::-1]  # RGB->BGR
+                else:
+                    image = image_array
                 
                 self.image_array = image
                 self.image_filename = filename
