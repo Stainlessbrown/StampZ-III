@@ -313,8 +313,9 @@ class GaugePerforationDialog:
                 
             # Convert from BGR to RGB if needed (OpenCV uses BGR, PIL uses RGB)
             if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                # Assume BGR from OpenCV and convert to RGB for PIL
-                display_array = image_array[:, :, ::-1]  # Reverse channel order BGR->RGB
+                # Use cv2 for proper conversion to maintain exact compatibility
+                import cv2
+                display_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
             else:
                 display_array = image_array
             
