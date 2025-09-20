@@ -9,7 +9,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk, ImageDraw
 import numpy as np
-import cv2
 import os
 from typing import Optional, Tuple, List
 import threading

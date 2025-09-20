@@ -10,8 +10,15 @@ import tkinter as tk
 from tkinter import messagebox
 import logging
 import numpy as np
-import cv2
 from typing import TYPE_CHECKING, Optional
+
+# Import cv2 with graceful fallback
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
 
 if TYPE_CHECKING:
     from ..app.stampz_app import StampZApp
@@ -28,6 +35,24 @@ class MeasurementManager:
     
     def measure_perforations(self):
         """Launch gauge-based perforation measurement dialog."""
+        # Check cv2 availability first
+        if not CV2_AVAILABLE:
+            # Add debug info to help troubleshoot
+            import sys
+            debug_info = (
+                f"Python executable: {sys.executable}\n"
+                f"Python version: {sys.version}\n"
+                f"Working directory: {os.getcwd()}\n"
+                f"CV2_AVAILABLE: {CV2_AVAILABLE}\n"
+            )
+            messagebox.showerror(
+                "Perforation measurement requires additional dependencies.",
+                f"Please install: pip install opencv-python\n\n"
+                f"Error: No module named 'cv2'\n\n"
+                f"Debug info:\n{debug_info}"
+            )
+            return
+            
         try:
             # Check if we have an image loaded
             image_array = None
@@ -74,6 +99,15 @@ class MeasurementManager:
     
     def measure_perforations_legacy(self):
         """Launch legacy hole-detection perforation measurement dialog."""
+        # Check cv2 availability first
+        if not CV2_AVAILABLE:
+            messagebox.showerror(
+                "Perforation measurement requires additional dependencies.",
+                "Please install: pip install opencv-python\n\n"
+                "Error: No module named 'cv2'"
+            )
+            return
+            
         try:
             # Check if we have an image loaded
             image_array = None

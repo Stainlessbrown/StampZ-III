@@ -93,10 +93,20 @@ try:
 except Exception:
     pass
 
+# Collect cv2 (OpenCV) data files and imports for perforation measurement
+try:
+    cv2_datas, cv2_binaries, cv2_hiddenimports = collect_all('cv2')
+    datas += cv2_datas
+    binaries += cv2_binaries
+    hiddenimports += cv2_hiddenimports
+except Exception:
+    pass
+
 # Add additional hidden imports
 hiddenimports += [
     'initialize_env',  # Critical: Entry point environment setup
     'launch_selector',  # Main application launch selector
+    'cv2',  # OpenCV for image processing
     'PIL.Image',
     'PIL.ImageTk',
     'PIL._tkinter_finder',
