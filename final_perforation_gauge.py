@@ -37,8 +37,8 @@ class FinalPerforationGauge:
         scale = self.dpi / 800.0
         reference_x = int(60 * scale)
         start_x = int(90 * scale)
-        start_y = int(100 * scale)
-        row_spacing = int(18 * scale)  # Tight spacing for quarters
+        start_y = int(60 * scale)  # Start higher up
+        row_spacing = int(15 * scale)  # Tighter spacing for all ranges
         
         # Reference line
         cv2.line(overlay, (reference_x, 0), (reference_x, height), 
@@ -53,7 +53,7 @@ class FinalPerforationGauge:
         # Create each gauge row
         for i, gauge in enumerate(self.gauge_values):
             y = start_y + i * row_spacing
-            if y >= height - int(60 * scale):
+            if y >= height - int(30 * scale):  # Smaller bottom margin
                 break
                 
             # Calculate dot spacing (20mm perforation standard)
