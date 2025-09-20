@@ -169,14 +169,33 @@ class BlackInkManager:
                 print(f"Black threshold: {black_threshold.get()}")
                 print(f"Saturation threshold: {saturation_threshold.get()}")
                 
+                # Load and convert image to numpy array
+                from PIL import Image
+                import numpy as np
+                
+                print(f"DEBUG: Loading image from {self.app.current_file}")
+                pil_image = Image.open(self.app.current_file)
+                
+                # Convert to RGB if needed
+                if pil_image.mode != 'RGB':
+                    print(f"DEBUG: Converting from {pil_image.mode} to RGB")
+                    pil_image = pil_image.convert('RGB')
+                
+                # Convert to numpy array
+                img_array = np.array(pil_image)
+                print(f"DEBUG: Image loaded as numpy array - shape: {img_array.shape}, dtype: {img_array.dtype}")
+                
                 # Perform extraction
-                extracted_image = extract_black_ink(
-                    self.app.current_file,
+                results, mask, analysis = extract_black_ink(
+                    img_array,
                     black_threshold=black_threshold.get(),
                     saturation_threshold=saturation_threshold.get()
                 )
                 
-                if extracted_image is not None:
+                if results is not None and len(results) > 0:
+                    # Use the 'pure_black' result for the main output
+                    extracted_image = results.get('pure_black', results[list(results.keys())[0]])
+                    
                     # Save extracted image
                     input_path = self.app.current_file
                     base_name = os.path.splitext(input_path)[0]
@@ -186,15 +205,31 @@ class BlackInkManager:
                     pil_image = safe_pil_fromarray(extracted_image)
                     pil_image.save(output_path, format='PNG')
                     
-                    # Log to unified data file
-                    self._log_extraction_data(output_path, black_threshold.get(), saturation_threshold.get())
+                    # Save additional versions if desired
+                    if 'enhanced' in results:
+                        enhanced_path = f"{base_name}_black_ink_enhanced.png"
+                        enhanced_pil = safe_pil_fromarray(results['enhanced'])
+                        enhanced_pil.save(enhanced_path, format='PNG')
                     
-                    messagebox.showinfo(
-                        "Extraction Complete",
+                    # Log to unified data file with analysis results
+                    self._log_extraction_data(
+                        output_path, 
+                        black_threshold.get(), 
+                        saturation_threshold.get(),
+                        analysis
+                    )
+                    
+                    # Create detailed success message
+                    coverage_pct = analysis.get('coverage_percentage', 0)
+                    success_message = (
                         f"Black ink extracted successfully!\\n\\n"
-                        f"Saved to: {os.path.basename(output_path)}\\n\\n"
+                        f"Saved to: {os.path.basename(output_path)}\\n"
+                        f"Coverage: {coverage_pct:.1f}% of image\\n"
+                        f"Cancellation pixels: {analysis.get('cancellation_pixels', 0):,}\\n\\n"
                         f"Data logged to unified file for comprehensive documentation."
                     )
+                    
+                    messagebox.showinfo("Extraction Complete", success_message)
                     
                     dialog.destroy()
                 else:
@@ -223,7 +258,7 @@ class BlackInkManager:
             command=dialog.destroy
         ).pack(side="right", padx=5)
         
-    def _log_extraction_data(self, output_path, black_threshold, saturation_threshold):
+    def _log_extraction_data(self, output_path, black_threshold, saturation_threshold, analysis=None):
         """Log extraction data to unified data file."""
         try:
             # Import unified logger
@@ -241,11 +276,22 @@ class BlackInkManager:
                 'method': 'Standard black ink extraction'
             }
             
+            # Include analysis data if available
             results = {
                 'output_file': os.path.basename(output_path),
                 'success': True,
                 'processing_time': 0  # Could be measured if needed
             }
+            
+            # Add analysis data if available
+            if analysis:
+                results.update({
+                    'coverage_percentage': analysis.get('coverage_percentage', 0),
+                    'cancellation_pixels': analysis.get('cancellation_pixels', 0),
+                    'total_pixels': analysis.get('total_pixels', 0),
+                    'red_median': analysis.get('red_median', 0),
+                    'avg_cancellation_brightness': analysis.get('avg_cancellation_brightness', 0)
+                })
             
             logger.log_black_ink_extraction(extraction_params, results)
             
