@@ -107,6 +107,8 @@ hiddenimports += [
     'initialize_env',  # Critical: Entry point environment setup
     'launch_selector',  # Main application launch selector
     'cv2',  # OpenCV for image processing
+    'gui.gauge_perforation_ui',  # Perforation gauge measurement dialog
+    'gui.perforation_ui',  # Legacy perforation measurement dialog
     'PIL.Image',
     'PIL.ImageTk',
     'PIL._tkinter_finder',
