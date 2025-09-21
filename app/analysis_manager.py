@@ -2017,7 +2017,7 @@ class AnalysisManager:
                 return
             
             # Create and show spectral analysis window
-            spectral_analyzer = SpectralAnalyzer(self.app.root, self.app.current_file)
+            spectral_analyzer = SpectralAnalyzer()
             
         except ImportError as e:
             messagebox.showerror(

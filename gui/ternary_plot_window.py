@@ -140,20 +140,22 @@ class TernaryPlotWindow:
         # Create matplotlib figure with interactive capabilities
         self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
+        
+        # Enhanced navigation toolbar with zoom/pan for dense data points (pack FIRST)
+        self.nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
+        self.nav_toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+        
+        # Add toolbar info
+        nav_info = ttk.Label(plot_frame, text="💡 Use zoom/pan toolbar above when points overlap", 
+                            font=('Arial', 9, 'italic'), foreground='gray')
+        nav_info.pack(side=tk.TOP, pady=(0, 2))
+        
+        # Pack canvas AFTER toolbar so toolbar appears above
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
         # Add click handler for point selection
         self.selected_points = set()
         self.canvas.mpl_connect('button_press_event', self._on_plot_click)
-        
-        # Enhanced navigation toolbar with zoom/pan for dense data points
-        self.nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
-        self.nav_toolbar.update()
-        
-        # Add toolbar info
-        nav_info = ttk.Label(plot_frame, text="💡 Use toolbar above to zoom/pan when points overlap", 
-                            font=('Arial', 9, 'italic'), foreground='gray')
-        nav_info.pack(pady=2)
         
         # Status bar
         self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN)
@@ -378,6 +380,15 @@ class TernaryPlotWindow:
         x_coords = []
         y_coords = []
         colors = []
+        markers = []
+        
+        # Color map for named colors from datasheet
+        color_map = {
+            'red': 'red', 'blue': 'blue', 'green': 'green', 'yellow': 'yellow',
+            'purple': 'purple', 'orange': 'orange', 'pink': 'pink', 'brown': 'brown',
+            'black': 'black', 'white': 'white', 'gray': 'gray', 'grey': 'gray',
+            'cyan': 'cyan', 'magenta': 'magenta'
+        }
         
         for point in self.color_points:
             # Ensure ternary coordinates are computed
@@ -386,7 +397,24 @@ class TernaryPlotWindow:
             
             x_coords.append(point.ternary_coords[0])
             y_coords.append(point.ternary_coords[1])
-            colors.append(tuple(c/255.0 for c in point.rgb))
+            
+            # Check if point has datasheet marker color, otherwise use RGB color
+            if (hasattr(point, 'metadata') and 'marker_color' in point.metadata and 
+                point.metadata['marker_color'] and point.metadata['marker_color'].lower() in color_map):
+                colors.append(color_map[point.metadata['marker_color'].lower()])
+            else:
+                # Use RGB color of the point
+                colors.append(tuple(c/255.0 for c in point.rgb))
+            
+            # Get marker style from metadata
+            if hasattr(point, 'metadata') and 'marker' in point.metadata:
+                marker_style = point.metadata['marker']
+                # Convert Plot_3D marker symbols to matplotlib symbols
+                marker_map = {'.': 'o', 'o': 'o', 's': 's', '^': '^', 'v': 'v', 
+                            'd': 'D', 'x': 'x', '+': '+', '*': '*'}
+                markers.append(marker_map.get(marker_style, 'o'))
+            else:
+                markers.append('o')  # Default circle
         
         # Create size and edge color arrays for highlighting selected points
         sizes = []
@@ -403,20 +431,27 @@ class TernaryPlotWindow:
                 edgecolors.append('black')
                 linewidths.append(0.5)
         
-        # Plot points with highlighting
+        # Plot points with highlighting and different markers
+        # For simplicity, we'll plot all points as circles but with proper colors
+        # Future enhancement: plot each marker type separately
         scatter = self.ax.scatter(x_coords, y_coords, c=colors, s=sizes, alpha=0.8, 
                                 edgecolors=edgecolors, linewidths=linewidths, zorder=3)
+        
+        # If we have marker metadata, show it in point labels (for small datasets)
+        if len(self.color_points) <= 15:
+            for i, point in enumerate(self.color_points):
+                label = point.id
+                if hasattr(point, 'metadata') and 'marker' in point.metadata:
+                    label += f" ({point.metadata['marker']})"
+                if hasattr(point, 'metadata') and 'marker_color' in point.metadata:
+                    label += f" [{point.metadata['marker_color']}]"
+                self.ax.annotate(label, (x_coords[i], y_coords[i]), 
+                               xytext=(5, 5), textcoords='offset points', 
+                               fontsize=8, alpha=0.7)
         
         # Add convex hull if requested
         if self.show_hull.get() and len(self.color_points) >= 3:
             self._add_convex_hull(x_coords, y_coords)
-        
-        # Add labels for small datasets
-        if len(self.color_points) <= 15:
-            for i, point in enumerate(self.color_points):
-                self.ax.annotate(point.id, (x_coords[i], y_coords[i]), 
-                               xytext=(5, 5), textcoords='offset points', 
-                               fontsize=8, alpha=0.7)
     
     def _add_convex_hull(self, x_coords, y_coords):
         """Add convex hull to the plot."""
@@ -1224,7 +1259,7 @@ class TernaryPlotWindow:
             
             for row in data_rows:
                 try:
-                    # Parse Plot_3D format: [Xnorm, Ynorm, Znorm, DataID, ...]
+                    # Parse Plot_3D format: [Xnorm, Ynorm, Znorm, DataID, Cluster, ΔE, Marker, Color, ...]
                     if len(row) < 4 or not row[3]:  # Skip incomplete rows or rows without DataID
                         continue
                         
@@ -1232,6 +1267,10 @@ class TernaryPlotWindow:
                     y_norm = float(row[1]) if row[1] != '' else 0.0  # a* normalized 
                     z_norm = float(row[2]) if row[2] != '' else 0.0  # b* normalized
                     data_id = str(row[3]) if row[3] != '' else f"Point_{len(updated_color_points)}"
+                    
+                    # Extract marker information from datasheet if available
+                    marker_style = str(row[6]) if len(row) > 6 and row[6] != '' else '.'
+                    marker_color = str(row[7]) if len(row) > 7 and row[7] != '' else 'blue'
                     
                     # Convert normalized values back to L*a*b*
                     l_star = x_norm * 100.0  # 0-1 → 0-100
@@ -1286,7 +1325,12 @@ class TernaryPlotWindow:
                         ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
                     
                     # Create ColorPoint object with preserved metadata
-                    metadata = {'source': 'datasheet_sync', 'original_rgb': rgb}
+                    metadata = {
+                        'source': 'datasheet_sync', 
+                        'original_rgb': rgb,
+                        'marker': marker_style,
+                        'marker_color': marker_color
+                    }
                     if original_ternary_coords is not None:
                         metadata['original_ternary_coords'] = original_ternary_coords
                     
