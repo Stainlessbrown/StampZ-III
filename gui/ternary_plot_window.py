@@ -137,14 +137,23 @@ class TernaryPlotWindow:
         plot_frame = ttk.Frame(main_frame)
         plot_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
         
-        # Create matplotlib figure
+        # Create matplotlib figure with interactive capabilities
         self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Navigation toolbar
+        # Add click handler for point selection
+        self.selected_points = set()
+        self.canvas.mpl_connect('button_press_event', self._on_plot_click)
+        
+        # Enhanced navigation toolbar with zoom/pan for dense data points
         nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         nav_toolbar.update()
+        
+        # Add toolbar info
+        nav_info = ttk.Label(plot_frame, text="💡 Use toolbar above to zoom/pan when points overlap", 
+                            font=('Arial', 9, 'italic'), foreground='gray')
+        nav_info.pack(pady=2)
         
         # Status bar
         self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN)
@@ -349,9 +358,24 @@ class TernaryPlotWindow:
         y_coords = [point.ternary_coords[1] for point in self.color_points]
         colors = [tuple(c/255.0 for c in point.rgb) for point in self.color_points]
         
-        # Plot points
-        scatter = self.ax.scatter(x_coords, y_coords, c=colors, s=60, alpha=0.8, 
-                                edgecolors='black', linewidths=0.5, zorder=3)
+        # Create size and edge color arrays for highlighting selected points
+        sizes = []
+        edgecolors = []
+        linewidths = []
+        
+        for i in range(len(self.color_points)):
+            if i in getattr(self, 'selected_points', set()):
+                sizes.append(100)  # Larger size for selected
+                edgecolors.append('yellow')
+                linewidths.append(3)
+            else:
+                sizes.append(60)  # Normal size
+                edgecolors.append('black')
+                linewidths.append(0.5)
+        
+        # Plot points with highlighting
+        scatter = self.ax.scatter(x_coords, y_coords, c=colors, s=sizes, alpha=0.8, 
+                                edgecolors=edgecolors, linewidths=linewidths, zorder=3)
         
         # Add convex hull if requested
         if self.show_hull.get() and len(self.color_points) >= 3:
@@ -1161,27 +1185,44 @@ class TernaryPlotWindow:
                     a_star = (y_norm * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
                     b_star = (z_norm * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
                     
-                    # Convert L*a*b* to RGB for ternary coordinates
-                    try:
-                        from utils.color_conversions import lab_to_rgb
-                        rgb = lab_to_rgb((l_star, a_star, b_star))
-                    except ImportError:
-                        # Simple approximation if conversion module not available
-                        r = max(0, min(255, l_star * 2.55 + a_star * 1.5))
-                        g = max(0, min(255, l_star * 2.55 - a_star * 0.5))
-                        b = max(0, min(255, l_star * 2.55 - b_star * 1.5))
-                        rgb = (r, g, b)
+                    # Try to use original RGB from existing points first to maintain accuracy
+                    rgb = None
+                    if hasattr(self, 'color_points') and len(updated_color_points) < len(self.color_points):
+                        # Use original point RGB to preserve ternary accuracy
+                        original_point = self.color_points[len(updated_color_points)]
+                        rgb = original_point.rgb
+                        logger.debug(f"Using original RGB: {rgb}")
+                    
+                    if rgb is None:
+                        # Convert L*a*b* to RGB for ternary coordinates
+                        try:
+                            from utils.color_conversions import lab_to_rgb
+                            rgb = lab_to_rgb((l_star, a_star, b_star))
+                        except ImportError:
+                            # More accurate approximation preserving color balance
+                            # Convert normalized L*a*b* back to RGB more carefully
+                            l_norm = l_star / 100.0  # L*: 0-100 -> 0-1
+                            a_norm = (a_star + 127.5) / 255.0  # a*: -127.5 to +127.5 -> 0-1
+                            b_norm = (b_star + 127.5) / 255.0  # b*: -127.5 to +127.5 -> 0-1
+                            
+                            # Better RGB approximation maintaining ratios
+                            r = max(0, min(255, l_norm * 255 + (a_norm - 0.5) * 100))
+                            g = max(0, min(255, l_norm * 255 - (a_norm - 0.5) * 50 + (b_norm - 0.5) * 20))
+                            b = max(0, min(255, l_norm * 255 - (b_norm - 0.5) * 100))
+                            rgb = (r, g, b)
                     
                     # Calculate ternary coordinates
                     ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
                     
-                    # Create ColorPoint object
+                    # Create ColorPoint object with metadata
+                    metadata = {'source': 'datasheet_sync', 'original_rgb': rgb}
+                    
                     color_point = ColorPoint(
                         id=data_id,
                         rgb=rgb,
                         lab=(l_star, a_star, b_star),
                         ternary_coords=ternary_coords,
-                        metadata={'source': 'datasheet_sync'}
+                        metadata=metadata
                     )
                     
                     updated_color_points.append(color_point)
@@ -1201,10 +1242,47 @@ class TernaryPlotWindow:
             logger.exception(f"Failed to sync from datasheet: {e}")
             raise
     
+    def _on_plot_click(self, event):
+        """Handle clicks on the ternary plot for point selection."""
+        if event.inaxes != self.ax or not self.color_points:
+            return
+            
+        # Find closest point to click
+        click_x, click_y = event.xdata, event.ydata
+        if click_x is None or click_y is None:
+            return
+            
+        min_distance = float('inf')
+        closest_point_idx = None
+        
+        for i, point in enumerate(self.color_points):
+            x, y = point.ternary_coords
+            distance = ((x - click_x) ** 2 + (y - click_y) ** 2) ** 0.5
+            if distance < min_distance:
+                min_distance = distance
+                closest_point_idx = i
+        
+        # Only select if click is reasonably close (within 0.05 units)
+        if min_distance < 0.05 and closest_point_idx is not None:
+            if closest_point_idx in self.selected_points:
+                self.selected_points.remove(closest_point_idx)
+            else:
+                self.selected_points.add(closest_point_idx)
+            
+            # Show point info
+            point = self.color_points[closest_point_idx]
+            self._update_status(f"Selected: {point.id} - RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})")
+            
+            # Refresh plot to show selection
+            self._refresh_plot()
+    
     def _update_status(self, message: str):
         """Update status bar."""
-        self.status_bar.config(text=message)
-        self.window.update_idletasks()
+        if hasattr(self, 'status_bar'):
+            self.status_bar.config(text=message)
+            self.window.update_idletasks()
+        else:
+            logger.info(message)
     
     def _on_close(self):
         """Handle window close."""
