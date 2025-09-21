@@ -493,8 +493,8 @@ class TernaryPlotWindow:
             file_ext = os.path.splitext(filename)[1].lower()
             
             if file_ext == '.ods':
-                # Load ODS file using existing bridge functionality
-                color_points = self.bridge.load_color_points_from_ods(filename)
+                # Load ODS file - check if it's Plot_3D format or standard format
+                color_points = self._load_ods_file(filename)
                 
             elif file_ext == '.xlsx':
                 # Load Excel file - convert to color points
@@ -648,6 +648,236 @@ class TernaryPlotWindow:
             
         except Exception as e:
             raise Exception(f"Failed to load Excel file: {e}")
+    
+    def _load_ods_file(self, filename: str):
+        """Load color data from ODS file, supporting both standard and Plot_3D normalized formats."""
+        try:
+            # First try the existing bridge (for standard format)
+            try:
+                color_points = self.bridge.load_color_points_from_ods(filename)
+                if color_points:
+                    return color_points
+            except Exception as bridge_error:
+                logger.info(f"Bridge loading failed, trying Plot_3D format: {bridge_error}")
+            
+            # If bridge fails, try Plot_3D normalized format
+            import pandas as pd
+            
+            # Read ODS file
+            df = pd.read_excel(filename, engine='odf')
+            
+            print(f"DEBUG: ODS columns found: {list(df.columns)}")
+            
+            color_points = []
+            
+            # Plot_3D normalized format patterns
+            plot3d_patterns = {
+                'x': ['Xnorm', 'X', 'x'],
+                'y': ['Ynorm', 'Y', 'y'],
+                'z': ['Znorm', 'Z', 'z']
+            }
+            
+            # Standard RGB patterns (0-255 or 0-1)
+            rgb_patterns = {
+                'r': ['R', 'r', 'Red', 'red', 'rgb_r'],
+                'g': ['G', 'g', 'Green', 'green', 'rgb_g'], 
+                'b': ['B', 'b', 'Blue', 'blue', 'rgb_b']
+            }
+            
+            # Standard L*a*b* patterns
+            lab_patterns = {
+                'l': ['L*', 'L_star', 'L', 'l_value', 'Lightness'],
+                'a': ['a*', 'a_star', 'a', 'a_value'],
+                'b': ['b*', 'b_star', 'b', 'b_value']
+            }
+            
+            # Find actual column names
+            plot3d_cols = {}
+            rgb_cols = {}
+            lab_cols = {}
+            
+            for coord, patterns in plot3d_patterns.items():
+                for pattern in patterns:
+                    if pattern in df.columns:
+                        plot3d_cols[coord] = pattern
+                        break
+            
+            for color, patterns in rgb_patterns.items():
+                for pattern in patterns:
+                    if pattern in df.columns:
+                        rgb_cols[color] = pattern
+                        break
+            
+            for color, patterns in lab_patterns.items():
+                for pattern in patterns:
+                    if pattern in df.columns:
+                        lab_cols[color] = pattern
+                        break
+            
+            # Determine data format
+            has_plot3d = len(plot3d_cols) == 3  # Xnorm, Ynorm, Znorm
+            has_rgb = len(rgb_cols) == 3
+            has_lab = len(lab_cols) == 3
+            
+            print(f"DEBUG: has_plot3d={has_plot3d}, has_rgb={has_rgb}, has_lab={has_lab}")
+            print(f"DEBUG: plot3d_cols={plot3d_cols}")
+            print(f"DEBUG: rgb_cols={rgb_cols}")
+            print(f"DEBUG: lab_cols={lab_cols}")
+            
+            if not (has_plot3d or has_rgb or has_lab):
+                available_cols = ', '.join(df.columns[:10])  # Show first 10 columns
+                raise ValueError(f"No recognizable color columns found.\n\n"
+                               f"Available columns: {available_cols}...\n\n"
+                               f"Expected formats:\n"
+                               f"• Plot_3D: Xnorm, Ynorm, Znorm (0-1 normalized)\n"
+                               f"• RGB: R, G, B (0-255 or 0-1)\n"
+                               f"• L*a*b*: L*, a*, b* (standard ranges)")
+            
+            # Process each row
+            for i, row in df.iterrows():
+                try:
+                    # Get ID (try multiple column names)
+                    point_id = None
+                    for id_col in ['DataID', 'ID', 'Name', 'Sample', 'Point', 'Label']:
+                        if id_col in df.columns:
+                            point_id = str(row[id_col])
+                            break
+                    if not point_id:
+                        point_id = f"Point_{i+1}"
+                    
+                    # Handle Plot_3D normalized format
+                    if has_plot3d:
+                        # Plot_3D uses normalized L*a*b* coordinates (0-1 range)
+                        x_norm = float(row[plot3d_cols['x']])  # L* normalized
+                        y_norm = float(row[plot3d_cols['y']])  # a* normalized  
+                        z_norm = float(row[plot3d_cols['z']])  # b* normalized
+                        
+                        # Convert back to standard ranges
+                        # L*: 0-1 → 0-100
+                        # a*, b*: 0-1 → -128 to +127 (assuming 0.5 = 0)
+                        lab = (
+                            x_norm * 100.0,                    # L*: 0-100
+                            (y_norm - 0.5) * 255.0,           # a*: -127.5 to +127.5  
+                            (z_norm - 0.5) * 255.0            # b*: -127.5 to +127.5
+                        )
+                        
+                        # For ternary analysis, we need RGB. Try to convert from Lab
+                        # This is approximate but sufficient for ternary analysis
+                        try:
+                            from utils.color_conversions import lab_to_rgb
+                            rgb = lab_to_rgb(lab)
+                        except ImportError:
+                            # Simple approximation Lab → RGB 
+                            l, a, b = lab
+                            # Very rough approximation
+                            r = max(0, min(255, l * 2.55 + a * 1.5))
+                            g = max(0, min(255, l * 2.55 - a * 0.5))
+                            b = max(0, min(255, l * 2.55 - b * 1.5))
+                            rgb = (r, g, b)
+                    
+                    # Handle standard RGB format
+                    elif has_rgb:
+                        rgb_values = (
+                            float(row[rgb_cols['r']]),
+                            float(row[rgb_cols['g']]), 
+                            float(row[rgb_cols['b']])
+                        )
+                        
+                        # Check if normalized (0-1) or standard (0-255)
+                        max_val = max(rgb_values)
+                        if max_val <= 1.0:
+                            # Normalized RGB, convert to 0-255
+                            rgb = tuple(v * 255.0 for v in rgb_values)
+                        else:
+                            # Already in 0-255 range
+                            rgb = rgb_values
+                        
+                        # Get or approximate L*a*b*
+                        if has_lab:
+                            lab = (
+                                float(row[lab_cols['l']]),
+                                float(row[lab_cols['a']]),
+                                float(row[lab_cols['b']])
+                            )
+                        else:
+                            # Approximate Lab from RGB
+                            try:
+                                from utils.color_conversions import rgb_to_lab
+                                lab = rgb_to_lab(rgb)
+                            except ImportError:
+                                # Simple approximation
+                                r, g, b = [c/255.0 for c in rgb]
+                                lab = (
+                                    50.0 + (r + g + b) * 16.67,
+                                    (r - g) * 50.0,
+                                    (b - (r + g)/2) * 50.0
+                                )
+                    
+                    # Handle L*a*b* only format
+                    elif has_lab:
+                        lab = (
+                            float(row[lab_cols['l']]),
+                            float(row[lab_cols['a']]),
+                            float(row[lab_cols['b']])
+                        )
+                        
+                        # Approximate RGB from Lab
+                        try:
+                            from utils.color_conversions import lab_to_rgb
+                            rgb = lab_to_rgb(lab)
+                        except ImportError:
+                            # Simple approximation
+                            l, a, b = lab
+                            r = max(0, min(255, l * 2.55 + a * 1.5))
+                            g = max(0, min(255, l * 2.55 - a * 0.5))
+                            b_val = max(0, min(255, l * 2.55 - b * 1.5))
+                            rgb = (r, g, b_val)
+                    
+                    else:
+                        raise ValueError("No valid color data format detected")
+                    
+                    # Calculate ternary coordinates
+                    ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
+                    
+                    # Create metadata
+                    metadata = {
+                        'source': 'external_ods',
+                        'file_path': filename,
+                        'row_index': i,
+                        'format': 'plot3d' if has_plot3d else 'standard'
+                    }
+                    
+                    # Add any other columns as metadata
+                    exclude_cols = (list(plot3d_cols.values()) + list(rgb_cols.values()) + 
+                                  list(lab_cols.values()) + ['DataID', 'ID', 'Name', 'Sample', 'Point', 'Label'])
+                    
+                    for col in df.columns:
+                        if col not in exclude_cols:
+                            try:
+                                metadata[col] = row[col]
+                            except:
+                                pass  # Skip problematic columns
+                    
+                    # Create ColorPoint
+                    color_point = ColorPoint(
+                        id=point_id,
+                        rgb=rgb,
+                        lab=lab,
+                        ternary_coords=ternary_coords,
+                        metadata=metadata
+                    )
+                    
+                    color_points.append(color_point)
+                    
+                except Exception as row_error:
+                    logger.warning(f"Failed to process row {i}: {row_error}")
+                    continue
+            
+            print(f"DEBUG: Successfully processed {len(color_points)} points")
+            return color_points
+            
+        except Exception as e:
+            raise Exception(f"Failed to load ODS file: {e}")
     
     def _save_plot(self):
         """Save current plot to file."""
