@@ -41,13 +41,14 @@ logger = logging.getLogger(__name__)
 class TernaryPlotWindow:
     """Plot_3D-style window for ternary plot visualization with K-means clustering."""
     
-    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None):
+    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None):
         """Initialize ternary plot window.
         
         Args:
             parent: Parent window (for integration)
             sample_set_name: Name of the sample set
             color_points: Optional pre-loaded color points
+            datasheet_ref: Optional reference to associated realtime datasheet
         """
         self.parent = parent
         self.sample_set_name = sample_set_name
@@ -61,14 +62,42 @@ class TernaryPlotWindow:
         # Track external file for integration
         self.external_file_path = None
         
-        # Initialize bridge and plotter
-        self.bridge = ColorDataBridge()
-        self.ternary_plotter = TernaryPlotter()
+        # Reference to associated realtime datasheet for bidirectional data flow
+        self.datasheet_ref = datasheet_ref
         
-        self._create_window()
-        self._setup_ui()
-        self._load_initial_data()
-        self._create_initial_plot()
+        # Initialize bridge and plotter
+        try:
+            logger.info("Initializing ColorDataBridge...")
+            self.bridge = ColorDataBridge()
+            
+            logger.info("Initializing TernaryPlotter...")
+            self.ternary_plotter = TernaryPlotter()
+            
+            logger.info("Creating window...")
+            self._create_window()
+            
+            logger.info("Setting up UI...")
+            self._setup_ui()
+            
+            logger.info("Loading initial data...")
+            self._load_initial_data()
+            
+            logger.info("Creating initial plot...")
+            self._create_initial_plot()
+            
+            logger.info("TernaryPlotWindow initialization complete")
+            
+        except Exception as init_error:
+            logger.exception(f"TernaryPlotWindow initialization failed: {init_error}")
+            # Try to show error to user if possible
+            try:
+                import tkinter.messagebox as mb
+                mb.showerror("Ternary Window Error", 
+                           f"Failed to initialize ternary window:\n\n{init_error}\n\n"
+                           f"Please check the console for detailed error information.")
+            except:
+                pass  # If even the messagebox fails, just log
+            raise
     
     def _create_window(self):
         """Create the main window with Plot_3D styling."""
@@ -157,8 +186,7 @@ class TernaryPlotWindow:
         right_frame.pack(side=tk.RIGHT)
         
         ttk.Button(right_frame, text="Save Plot", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame, text="Open in Plot_3D", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame, text="Open in Datasheet", command=self._open_datasheet).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(right_frame, text="Open Datasheet", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
     
     def _load_initial_data(self):
         """Load initial data if color_points not provided."""
@@ -174,7 +202,18 @@ class TernaryPlotWindow:
         self._refresh_plot()
     
     def _refresh_plot(self):
-        """Refresh the ternary plot with current settings."""
+        """Refresh the ternary plot with current settings.
+        
+        If linked to a datasheet, optionally sync from datasheet data.
+        """
+        # Check if we should sync from linked datasheet
+        if self.datasheet_ref and hasattr(self.datasheet_ref, 'sheet'):
+            try:
+                self._sync_from_datasheet()
+            except Exception as e:
+                logger.warning(f"Could not sync from datasheet: {e}")
+                # Continue with existing data
+        
         if not self.color_points:
             self.ax.clear()
             self.ax.text(0.5, 0.5, 'No data available\nUse "Load Data" to load sample set', 
@@ -198,7 +237,8 @@ class TernaryPlotWindow:
             self.ax.axis('off')
             self.canvas.draw()
             
-            self._update_status(f"Plot updated: {len(self.color_points)} points")
+            data_source = "(synced from datasheet)" if hasattr(self, 'datasheet_ref') and self.datasheet_ref else ""
+            self._update_status(f"Plot updated: {len(self.color_points)} points {data_source}")
             
         except Exception as e:
             logger.exception("Error refreshing plot")
@@ -905,29 +945,57 @@ class TernaryPlotWindow:
             messagebox.showerror("Save Error", f"Failed to save plot: {e}")
     
     def _open_plot3d(self):
-        """Open Plot_3D with current data (external file or sample set)."""
+        """Open realtime datasheet with current data (Plot_3D workflow)."""
         try:
-            from plot3d.standalone_plot3d import main as plot3d_main
-            import threading
+            # Open realtime datasheet just like Plot_3D does
+            from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
             
-            def launch_plot3d():
-                try:
-                    if self.external_file_path:
-                        # Launch Plot_3D with the same external file
-                        plot3d_main(auto_load_file=self.external_file_path)
-                        self._update_status(f"Plot_3D opened with {os.path.basename(self.external_file_path)}")
-                    else:
-                        # Launch Plot_3D normally (for database sample sets)
-                        plot3d_main()
-                        self._update_status("Plot_3D launched for L*a*b* analysis")
-                except Exception as e:
-                    logger.warning(f"Plot_3D launch failed: {e}")
+            # Create datasheet name based on current data
+            if self.external_file_path:
+                datasheet_name = f"Ternary: {os.path.basename(self.external_file_path, '.ods').replace('.xlsx', '')}"
+            else:
+                datasheet_name = f"Ternary: {self.sample_set_name}"
             
-            thread = threading.Thread(target=launch_plot3d, daemon=True)
-            thread.start()
+            # Create realtime datasheet (don't load initial data, we'll populate it)
+            datasheet = RealtimePlot3DSheet(
+                parent=self.window,
+                sample_set_name=datasheet_name,
+                load_initial_data=False
+            )
             
+            # Populate datasheet with current ternary data converted to Plot_3D format
+            self._populate_datasheet_with_current_data(datasheet)
+            
+            # Store reference for bidirectional updates
+            self.datasheet_ref = datasheet
+            
+            # Add back-reference to datasheet for navigation
+            datasheet.ternary_window_ref = self
+            
+            # Add "Return to Ternary" button to datasheet toolbar
+            if hasattr(datasheet, 'plot3d_btn') and hasattr(datasheet.plot3d_btn, 'pack_info'):
+                # Add button after the Plot_3D button
+                return_btn = ttk.Button(
+                    datasheet.plot3d_btn.master, 
+                    text="Return to Ternary", 
+                    command=self._bring_ternary_to_front
+                )
+                return_btn.pack(side=tk.LEFT, padx=5)
+            
+            self._update_status(f"Realtime datasheet opened: {datasheet_name}")
+            
+            messagebox.showinfo(
+                "Datasheet Ready",
+                f"Realtime datasheet opened with {len(self.color_points)} color points.\n\n"
+                "• Data converted to Plot_3D normalized format (0-1 range)\n"
+                "• Use 'Launch Plot_3D' button in datasheet for 3D visualization\n"
+                "• Edit data in datasheet and refresh ternary plot to see changes"
+            )
+                    
         except Exception as e:
-            messagebox.showerror("Launch Error", f"Failed to launch Plot_3D: {e}")
+            error_msg = f"Failed to open realtime datasheet: {e}"
+            logger.exception(error_msg)
+            messagebox.showerror("Datasheet Error", error_msg)
     
     def _open_datasheet(self):
         """Open realtime datasheet with current data."""
@@ -967,54 +1035,171 @@ class TernaryPlotWindow:
             logger.exception("Failed to open datasheet")
             messagebox.showerror("Datasheet Error", f"Failed to open datasheet: {e}")
     
-    def _populate_datasheet(self, datasheet):
-        """Populate datasheet with current color points (convert back to Plot_3D format)."""
+    def _populate_datasheet_with_current_data(self, datasheet):
+        """Populate realtime datasheet with current ternary data in proper Plot_3D format."""
         try:
-            # Convert ColorPoint objects back to Plot_3D normalized format
-            plot3d_data = []
+            if not self.color_points:
+                logger.warning("No color points to populate datasheet")
+                return
+                
+            # Convert ColorPoint objects to Plot_3D normalized format
+            plot3d_data_rows = []
             
             for i, point in enumerate(self.color_points):
-                # Convert L*a*b* back to normalized 0-1 range
-                l_norm = point.lab[0] / 100.0  # L*: 0-100 → 0-1
-                a_norm = (point.lab[1] + 127.5) / 255.0  # a*: -127.5 to +127.5 → 0-1
-                b_norm = (point.lab[2] + 127.5) / 255.0  # b*: -127.5 to +127.5 → 0-1
+                # Convert L*a*b* to normalized 0-1 range (Plot_3D format)
+                l_norm = max(0.0, min(1.0, point.lab[0] / 100.0))  # L*: 0-100 → 0-1
+                a_norm = max(0.0, min(1.0, (point.lab[1] + 127.5) / 255.0))  # a*: -127.5 to +127.5 → 0-1  
+                b_norm = max(0.0, min(1.0, (point.lab[2] + 127.5) / 255.0))  # b*: -127.5 to +127.5 → 0-1
                 
-                # Create row in Plot_3D format
-                row_data = {
-                    'Xnorm': l_norm,
-                    'Ynorm': a_norm,
-                    'Znorm': b_norm,
-                    'DataID': point.id,
-                    'Cluster': 0,  # Default cluster
-                    '∆E': 0.0,    # Default Delta E
-                    'Marker': '.',  # Default marker
-                    'Color': 'blue',  # Default color
-                    'Centroid_X': 0.0,
-                    'Centroid_Y': 0.0,
-                    'Centroid_Z': 0.0,
-                    'Sphere': 'none',
-                    'Radius': 0.0
-                }
+                # Create row data in Plot_3D format
+                row_data = [
+                    round(l_norm, 6),      # Xnorm (L*)
+                    round(a_norm, 6),      # Ynorm (a*) 
+                    round(b_norm, 6),      # Znorm (b*)
+                    point.id,              # DataID
+                    '',                    # Cluster (empty for user to assign)
+                    '',                    # ∆E (empty - to be calculated)
+                    '.',                   # Marker (default)
+                    'blue',                # Color (default)
+                    '',                    # Centroid_X (empty)
+                    '',                    # Centroid_Y (empty)
+                    '',                    # Centroid_Z (empty)
+                    '',                    # Sphere (empty)
+                    ''                     # Radius (empty)
+                ]
                 
-                plot3d_data.append(row_data)
+                plot3d_data_rows.append(row_data)
             
-            # Convert to DataFrame and populate sheet
-            import pandas as pd
-            df = pd.DataFrame(plot3d_data)
-            
-            # Populate the datasheet (this would need to be implemented in RealtimePlot3DSheet)
-            # For now, we'll just show a success message
-            messagebox.showinfo(
-                "Datasheet Integration",
-                f"Ready to populate datasheet with {len(plot3d_data)} color points.\n\n"
-                f"Data converted to Plot_3D normalized format:\n"
-                f"• Xnorm, Ynorm, Znorm (0-1 range)\n"
-                f"• {len(self.color_points)} color points available"
-            )
-            
+            # Setup proper Plot_3D sheet structure
+            if hasattr(datasheet, 'sheet'):
+                # Calculate total rows needed: 7 reserved + data + buffer
+                total_rows_needed = 7 + len(plot3d_data_rows) + 10  # 7 reserved + data + 10 buffer
+                
+                # Clear existing sheet and create proper structure
+                current_rows = datasheet.sheet.get_total_rows()
+                if current_rows > 0:
+                    datasheet.sheet.delete_rows(0, current_rows)
+                
+                # Create empty rows for proper structure
+                empty_rows = [[''] * len(datasheet.PLOT3D_COLUMNS)] * total_rows_needed
+                datasheet.sheet.insert_rows(rows=empty_rows, idx=0)
+                
+                # Set headers in row 1 (index 0)
+                datasheet.sheet.set_row_data(0, values=datasheet.PLOT3D_COLUMNS)
+                
+                # Leave rows 2-7 (indices 1-6) empty for centroid data - this is the protected pink area
+                
+                # Insert data starting at row 8 (index 7) as per Plot_3D format
+                for i, row_data in enumerate(plot3d_data_rows):
+                    row_index = 7 + i  # Start at row 7 (display row 8)
+                    datasheet.sheet.set_row_data(row_index, values=row_data)
+                
+                # Apply proper formatting and validation
+                datasheet._apply_formatting()
+                datasheet._setup_validation()
+                
+                logger.info(f"Populated datasheet with {len(plot3d_data_rows)} data rows in proper Plot_3D format")
+                logger.info(f"Headers in row 1, protected area in rows 2-7, data starts at row 8")
+                
+            else:
+                logger.warning("Datasheet sheet widget not found")
+                
         except Exception as e:
-            logger.exception("Failed to populate datasheet")
+            logger.exception(f"Failed to populate datasheet: {e}")
             raise Exception(f"Datasheet population failed: {e}")
+            
+    def _populate_datasheet(self, datasheet):
+        """Legacy method - calls the new method for backward compatibility."""
+        return self._populate_datasheet_with_current_data(datasheet)
+        
+    def _bring_ternary_to_front(self):
+        """Bring the ternary window to front and focus it."""
+        try:
+            if hasattr(self, 'window') and self.window:
+                self.window.lift()
+                self.window.focus_force()
+                self.window.attributes('-topmost', True)
+                self.window.after(100, lambda: self.window.attributes('-topmost', False))
+        except Exception as e:
+            logger.warning(f"Could not bring ternary window to front: {e}")
+    
+    def _sync_from_datasheet(self):
+        """Sync data from linked datasheet back to ternary plot."""
+        try:
+            if not self.datasheet_ref or not hasattr(self.datasheet_ref, 'sheet'):
+                return
+                
+            # Get current data from datasheet (skip header row)
+            sheet_data = self.datasheet_ref.sheet.get_sheet_data()
+            
+            # Skip header row (index 0) and protected rows (indices 1-6), start from index 7
+            if len(sheet_data) > 7:
+                data_rows = sheet_data[7:]  # Data starts at row 8 (index 7)
+            else:
+                data_rows = []
+            
+            if not data_rows:
+                logger.warning("No data rows in linked datasheet")
+                return
+                
+            # Convert datasheet data back to ColorPoint objects
+            updated_color_points = []
+            
+            for row in data_rows:
+                try:
+                    # Parse Plot_3D format: [Xnorm, Ynorm, Znorm, DataID, ...]
+                    if len(row) < 4 or not row[3]:  # Skip incomplete rows or rows without DataID
+                        continue
+                        
+                    x_norm = float(row[0]) if row[0] != '' else 0.0  # L* normalized
+                    y_norm = float(row[1]) if row[1] != '' else 0.0  # a* normalized 
+                    z_norm = float(row[2]) if row[2] != '' else 0.0  # b* normalized
+                    data_id = str(row[3]) if row[3] != '' else f"Point_{len(updated_color_points)}"
+                    
+                    # Convert normalized values back to L*a*b*
+                    l_star = x_norm * 100.0  # 0-1 → 0-100
+                    a_star = (y_norm * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
+                    b_star = (z_norm * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
+                    
+                    # Convert L*a*b* to RGB for ternary coordinates
+                    try:
+                        from utils.color_conversions import lab_to_rgb
+                        rgb = lab_to_rgb((l_star, a_star, b_star))
+                    except ImportError:
+                        # Simple approximation if conversion module not available
+                        r = max(0, min(255, l_star * 2.55 + a_star * 1.5))
+                        g = max(0, min(255, l_star * 2.55 - a_star * 0.5))
+                        b = max(0, min(255, l_star * 2.55 - b_star * 1.5))
+                        rgb = (r, g, b)
+                    
+                    # Calculate ternary coordinates
+                    ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
+                    
+                    # Create ColorPoint object
+                    color_point = ColorPoint(
+                        id=data_id,
+                        rgb=rgb,
+                        lab=(l_star, a_star, b_star),
+                        ternary_coords=ternary_coords,
+                        metadata={'source': 'datasheet_sync'}
+                    )
+                    
+                    updated_color_points.append(color_point)
+                    
+                except (ValueError, IndexError, TypeError) as row_error:
+                    logger.warning(f"Skipping invalid row in datasheet: {row_error}")
+                    continue
+            
+            # Update color points if we got valid data
+            if updated_color_points:
+                self.color_points = updated_color_points
+                logger.info(f"Synced {len(updated_color_points)} points from datasheet")
+            else:
+                logger.warning("No valid data found in datasheet for sync")
+                
+        except Exception as e:
+            logger.exception(f"Failed to sync from datasheet: {e}")
+            raise
     
     def _update_status(self, message: str):
         """Update status bar."""

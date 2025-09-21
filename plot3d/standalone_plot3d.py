@@ -36,8 +36,12 @@ def setup_standalone_environment():
             print(f"Created directory: {dir_path}")
 
 
-def main():
-    """Launch the standalone Plot_3D Data Manager."""
+def main(auto_load_file=None):
+    """Launch the standalone Plot_3D Data Manager.
+    
+    Args:
+        auto_load_file: Optional path to automatically load a file on startup
+    """
     print("Starting Plot_3D Data Manager in standalone mode...")
     
     try:
@@ -49,7 +53,7 @@ def main():
         
         # Create and configure Plot_3D application in standalone mode
         # Note: Plot3DApp creates its own root window when parent=None
-        plot3d_app = Plot3DApp(parent=None)  # standalone mode
+        plot3d_app = Plot3DApp(parent=None, data_path=auto_load_file)  # standalone mode with optional auto-load
         
         print("Plot_3D Data Manager initialized successfully")
         print("Available features:")

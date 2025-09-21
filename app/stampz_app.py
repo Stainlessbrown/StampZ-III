@@ -350,15 +350,22 @@ class StampZApp:
             if display_mode == "interactive":
                 # Open interactive ternary window (Plot_3D style)
                 try:
+                    logger.info(f"Starting ternary window initialization for {sample_set}")
                     from gui.ternary_plot_window import TernaryPlotWindow
+                    
+                    logger.info(f"TernaryPlotWindow imported, creating window...")
                     ternary_window = TernaryPlotWindow(
                         parent=self.root,
                         sample_set_name=sample_set,
                         color_points=color_points
                     )
+                    
+                    logger.info(f"Ternary window created, setting options...")
                     # Set hull option
                     ternary_window.show_hull.set(show_hull)
                     ternary_window._refresh_plot()
+                    
+                    logger.info(f"Ternary window initialization complete")
                     
                     msg = f"Interactive ternary window opened for '{sample_set}'\n\n📊 {len(color_points)} colors loaded\n🔧 K-means clustering available\n📈 Interactive analysis tools"
                     if launch_plot3d:

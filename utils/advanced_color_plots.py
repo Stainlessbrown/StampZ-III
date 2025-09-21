@@ -25,6 +25,12 @@ try:
     HAS_PLOTLY = True
 except ImportError:
     HAS_PLOTLY = False
+    # Create dummy classes to prevent NameError
+    class _DummyPlotly:
+        class Figure:
+            pass
+    go = _DummyPlotly()
+    px = None
     print("Warning: plotly not installed. Install with: pip install plotly")
     print("3D interactive plots will not be available.")
 
