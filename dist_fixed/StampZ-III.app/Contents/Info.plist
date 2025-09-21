@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>StampZ-III</string>
+	<key>CFBundleExecutable</key>
+	<string>StampZ-III</string>
+	<key>CFBundleIconFile</key>
+	<string>generated-906eeff9e4969d2e36bd877e399ccb793679f0609055762a17a8f75134299123.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.stainlessbrown.stampz-iii</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>StampZ-III</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0.2</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

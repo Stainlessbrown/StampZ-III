@@ -1,0 +1,1 @@
+../../Resources/scipy/__config__.py

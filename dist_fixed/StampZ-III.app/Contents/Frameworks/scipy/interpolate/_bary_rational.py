@@ -1,0 +1,1 @@
+../../../Resources/scipy/interpolate/_bary_rational.py

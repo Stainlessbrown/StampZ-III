@@ -357,7 +357,8 @@ class StampZApp:
                     ternary_window = TernaryPlotWindow(
                         parent=self.root,
                         sample_set_name=sample_set,
-                        color_points=color_points
+                        color_points=color_points,
+                        app_ref=self  # Pass app reference for integration features
                     )
                     
                     logger.info(f"Ternary window created, setting options...")

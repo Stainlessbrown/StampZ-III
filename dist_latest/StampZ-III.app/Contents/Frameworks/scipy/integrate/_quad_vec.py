@@ -1,0 +1,1 @@
+../../../Resources/scipy/integrate/_quad_vec.py

@@ -1,0 +1,1 @@
+../../../Resources/scipy/linalg/_cythonized_array_utils.pxd

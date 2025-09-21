@@ -1,0 +1,1 @@
+../../../Resources/scipy/special/_test_internal.pyi

@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 class TernaryPlotWindow:
     """Plot_3D-style window for ternary plot visualization with K-means clustering."""
     
-    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None):
+    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None, app_ref=None):
         """Initialize ternary plot window.
         
         Args:
@@ -49,6 +49,7 @@ class TernaryPlotWindow:
             sample_set_name: Name of the sample set
             color_points: Optional pre-loaded color points
             datasheet_ref: Optional reference to associated realtime datasheet
+            app_ref: Optional reference to main application for integration features
         """
         self.parent = parent
         self.sample_set_name = sample_set_name
@@ -64,6 +65,9 @@ class TernaryPlotWindow:
         
         # Reference to associated realtime datasheet for bidirectional data flow
         self.datasheet_ref = datasheet_ref
+        
+        # Store app reference for integration features (spectral analyzer, etc.)
+        self.app_ref = app_ref
         
         # Initialize bridge and plotter
         try:
@@ -145,8 +149,11 @@ class TernaryPlotWindow:
         self.nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         self.nav_toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
         
+        # Update toolbar to ensure it's functional
+        self.nav_toolbar.update()
+        
         # Add toolbar info
-        nav_info = ttk.Label(plot_frame, text="💡 Use zoom/pan toolbar above when points overlap", 
+        nav_info = ttk.Label(plot_frame, text="💡 Use zoom/pan toolbar above when points overlap | Click points to select/highlight", 
                             font=('Arial', 9, 'italic'), foreground='gray')
         nav_info.pack(side=tk.TOP, pady=(0, 2))
         
@@ -202,6 +209,7 @@ class TernaryPlotWindow:
         
         ttk.Button(right_frame, text="Save Plot", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(right_frame, text="Open Datasheet", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(right_frame, text="Spectral Analysis", command=self._open_spectral_analyzer).pack(side=tk.LEFT, padx=(5, 0))
     
     def _load_initial_data(self):
         """Load initial data if color_points not provided."""
@@ -372,15 +380,9 @@ class TernaryPlotWindow:
                         color='blue', fontweight='bold')
     
     def _plot_data_points(self):
-        """Plot the color data points."""
+        """Plot the color data points with proper marker types and highlighting."""
         if not self.color_points:
             return
-        
-        # Extract coordinates and colors, ensure ternary coordinates are computed
-        x_coords = []
-        y_coords = []
-        colors = []
-        markers = []
         
         # Color map for named colors from datasheet
         color_map = {
@@ -390,67 +392,96 @@ class TernaryPlotWindow:
             'cyan': 'cyan', 'magenta': 'magenta'
         }
         
-        for point in self.color_points:
+        # Convert Plot_3D marker symbols to matplotlib symbols
+        marker_map = {'.': 'o', 'o': 'o', 's': 's', '^': '^', 'v': 'v', 
+                     'd': 'D', 'x': 'x', '+': '+', '*': '*'}
+        
+        # Group points by marker type for efficient plotting
+        marker_groups = {}
+        
+        for i, point in enumerate(self.color_points):
             # Ensure ternary coordinates are computed
             if not hasattr(point, 'ternary_coords') or point.ternary_coords is None:
                 point.ternary_coords = self.ternary_plotter.rgb_to_ternary(point.rgb)
             
-            x_coords.append(point.ternary_coords[0])
-            y_coords.append(point.ternary_coords[1])
+            # Get marker style from metadata
+            marker_style = 'o'  # default
+            if hasattr(point, 'metadata') and 'marker' in point.metadata and point.metadata['marker']:
+                marker_style = marker_map.get(point.metadata['marker'], 'o')
             
-            # Check if point has datasheet marker color, otherwise use RGB color
+            # Get color from metadata or RGB
             if (hasattr(point, 'metadata') and 'marker_color' in point.metadata and 
                 point.metadata['marker_color'] and point.metadata['marker_color'].lower() in color_map):
-                colors.append(color_map[point.metadata['marker_color'].lower()])
+                point_color = color_map[point.metadata['marker_color'].lower()]
             else:
                 # Use RGB color of the point
-                colors.append(tuple(c/255.0 for c in point.rgb))
+                point_color = tuple(c/255.0 for c in point.rgb)
             
-            # Get marker style from metadata
-            if hasattr(point, 'metadata') and 'marker' in point.metadata:
-                marker_style = point.metadata['marker']
-                # Convert Plot_3D marker symbols to matplotlib symbols
-                marker_map = {'.': 'o', 'o': 'o', 's': 's', '^': '^', 'v': 'v', 
-                            'd': 'D', 'x': 'x', '+': '+', '*': '*'}
-                markers.append(marker_map.get(marker_style, 'o'))
-            else:
-                markers.append('o')  # Default circle
-        
-        # Create size and edge color arrays for highlighting selected points
-        sizes = []
-        edgecolors = []
-        linewidths = []
-        
-        for i in range(len(self.color_points)):
+            # Determine size and edge color based on selection
             if i in getattr(self, 'selected_points', set()):
-                sizes.append(100)  # Larger size for selected
-                edgecolors.append('yellow')
-                linewidths.append(3)
+                size = 120  # Larger size for selected
+                edgecolor = 'yellow'
+                linewidth = 3
             else:
-                sizes.append(60)  # Normal size
-                edgecolors.append('black')
-                linewidths.append(0.5)
+                size = 60  # Normal size
+                edgecolor = 'black'
+                linewidth = 0.5
+            
+            # Group by marker type
+            if marker_style not in marker_groups:
+                marker_groups[marker_style] = {
+                    'x': [], 'y': [], 'colors': [], 'sizes': [], 
+                    'edgecolors': [], 'linewidths': [], 'indices': []
+                }
+            
+            marker_groups[marker_style]['x'].append(point.ternary_coords[0])
+            marker_groups[marker_style]['y'].append(point.ternary_coords[1])
+            marker_groups[marker_style]['colors'].append(point_color)
+            marker_groups[marker_style]['sizes'].append(size)
+            marker_groups[marker_style]['edgecolors'].append(edgecolor)
+            marker_groups[marker_style]['linewidths'].append(linewidth)
+            marker_groups[marker_style]['indices'].append(i)
         
-        # Plot points with highlighting and different markers
-        # For simplicity, we'll plot all points as circles but with proper colors
-        # Future enhancement: plot each marker type separately
-        scatter = self.ax.scatter(x_coords, y_coords, c=colors, s=sizes, alpha=0.8, 
-                                edgecolors=edgecolors, linewidths=linewidths, zorder=3)
+        # Plot each marker type separately
+        self.plotted_points = {}  # Store for click detection
         
-        # If we have marker metadata, show it in point labels (for small datasets)
+        for marker_style, group_data in marker_groups.items():
+            scatter = self.ax.scatter(
+                group_data['x'], group_data['y'], 
+                c=group_data['colors'], 
+                s=group_data['sizes'], 
+                marker=marker_style,
+                alpha=0.8, 
+                edgecolors=group_data['edgecolors'], 
+                linewidths=group_data['linewidths'], 
+                zorder=3,
+                picker=True  # Enable picking for click detection
+            )
+            
+            # Store mapping for click detection
+            for i, point_idx in enumerate(group_data['indices']):
+                self.plotted_points[point_idx] = {
+                    'x': group_data['x'][i],
+                    'y': group_data['y'][i], 
+                    'scatter': scatter
+                }
+        
+        # Add point labels for small datasets
         if len(self.color_points) <= 15:
             for i, point in enumerate(self.color_points):
                 label = point.id
-                if hasattr(point, 'metadata') and 'marker' in point.metadata:
+                if hasattr(point, 'metadata') and 'marker' in point.metadata and point.metadata['marker']:
                     label += f" ({point.metadata['marker']})"
-                if hasattr(point, 'metadata') and 'marker_color' in point.metadata:
+                if hasattr(point, 'metadata') and 'marker_color' in point.metadata and point.metadata['marker_color']:
                     label += f" [{point.metadata['marker_color']}]"
-                self.ax.annotate(label, (x_coords[i], y_coords[i]), 
+                self.ax.annotate(label, (point.ternary_coords[0], point.ternary_coords[1]), 
                                xytext=(5, 5), textcoords='offset points', 
                                fontsize=8, alpha=0.7)
         
         # Add convex hull if requested
         if self.show_hull.get() and len(self.color_points) >= 3:
+            x_coords = [p.ternary_coords[0] for p in self.color_points]
+            y_coords = [p.ternary_coords[1] for p in self.color_points]
             self._add_convex_hull(x_coords, y_coords)
     
     def _add_convex_hull(self, x_coords, y_coords):
@@ -1381,25 +1412,49 @@ class TernaryPlotWindow:
         closest_point_idx = None
         
         for i, point in enumerate(self.color_points):
-            x, y = point.ternary_coords
-            distance = ((x - click_x) ** 2 + (y - click_y) ** 2) ** 0.5
-            if distance < min_distance:
-                min_distance = distance
-                closest_point_idx = i
+            if hasattr(point, 'ternary_coords') and point.ternary_coords:
+                x, y = point.ternary_coords[0], point.ternary_coords[1]
+                distance = ((x - click_x) ** 2 + (y - click_y) ** 2) ** 0.5
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_point_idx = i
         
-        # Only select if click is reasonably close (within 0.05 units)
-        if min_distance < 0.05 and closest_point_idx is not None:
+        # Only select if click is reasonably close (within 0.08 units for easier clicking)
+        if min_distance < 0.08 and closest_point_idx is not None:
+            # Toggle selection
+            if not hasattr(self, 'selected_points'):
+                self.selected_points = set()
+                
             if closest_point_idx in self.selected_points:
                 self.selected_points.remove(closest_point_idx)
+                status_msg = f"Deselected: {self.color_points[closest_point_idx].id}"
             else:
                 self.selected_points.add(closest_point_idx)
+                point = self.color_points[closest_point_idx]
+                
+                # Build detailed info string
+                info_parts = []
+                info_parts.append(f"ID: {point.id}")
+                info_parts.append(f"RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})")
+                
+                if hasattr(point, 'metadata'):
+                    if 'marker' in point.metadata and point.metadata['marker']:
+                        info_parts.append(f"Marker: {point.metadata['marker']}")
+                    if 'marker_color' in point.metadata and point.metadata['marker_color']:
+                        info_parts.append(f"Color: {point.metadata['marker_color']}")
+                
+                status_msg = "Selected: " + " | ".join(info_parts)
             
-            # Show point info
-            point = self.color_points[closest_point_idx]
-            self._update_status(f"Selected: {point.id} - RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})")
+            self._update_status(status_msg)
             
-            # Refresh plot to show selection
-            self._refresh_plot()
+            # Refresh plot to show selection changes
+            self._refresh_plot_only()  # Use _only to avoid datasheet sync during selection
+        else:
+            # Click not close to any point - clear selection if any exists
+            if hasattr(self, 'selected_points') and self.selected_points:
+                self.selected_points.clear()
+                self._update_status("Selection cleared")
+                self._refresh_plot_only()
     
     def _update_status(self, message: str):
         """Update status bar."""
@@ -1408,6 +1463,56 @@ class TernaryPlotWindow:
             self.window.update_idletasks()
         else:
             logger.info(message)
+    
+    def _open_spectral_analyzer(self):
+        """Open spectral analyzer window."""
+        try:
+            # Check if we have an app reference with current file
+            if hasattr(self, 'app_ref') and hasattr(self.app_ref, 'current_file') and self.app_ref.current_file:
+                # Use app's analysis manager to open spectral analysis
+                if hasattr(self.app_ref, 'analysis_manager'):
+                    self.app_ref.analysis_manager.open_spectral_analysis()
+                else:
+                    # Fallback: create spectral analyzer directly
+                    self._create_spectral_analyzer()
+            else:
+                # No app context - try to create spectral analyzer directly
+                self._create_spectral_analyzer()
+                
+        except Exception as e:
+            logger.exception("Failed to open spectral analyzer")
+            messagebox.showerror("Spectral Analysis Error", f"Failed to open spectral analyzer: {e}")
+    
+    def _create_spectral_analyzer(self):
+        """Create spectral analyzer window directly."""
+        try:
+            from utils.spectral_analyzer import SpectralAnalyzer
+            
+            # Create spectral analyzer window
+            analyzer_window = tk.Toplevel(self.window)
+            analyzer_window.title("Spectral Analysis")
+            analyzer_window.geometry("800x600")
+            
+            # Center window
+            analyzer_window.transient(self.window)
+            analyzer_window.update_idletasks()
+            x = (analyzer_window.winfo_screenwidth() // 2) - (analyzer_window.winfo_width() // 2)
+            y = (analyzer_window.winfo_screenheight() // 2) - (analyzer_window.winfo_height() // 2)
+            analyzer_window.geometry(f"+{x}+{y}")
+            
+            # Create analyzer instance
+            spectral_analyzer = SpectralAnalyzer(parent=analyzer_window)
+            
+            self._update_status("Spectral analyzer opened")
+            
+        except ImportError:
+            messagebox.showwarning(
+                "Component Missing", 
+                "Spectral analyzer module not available.\n\n"
+                "This feature may require additional components to be installed."
+            )
+        except Exception as e:
+            raise Exception(f"Could not create spectral analyzer: {e}")
     
     def _on_close(self):
         """Handle window close."""

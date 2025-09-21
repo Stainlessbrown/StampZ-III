@@ -1,0 +1,1 @@
+../../../Resources/scipy/optimize/cython_optimize.pxd

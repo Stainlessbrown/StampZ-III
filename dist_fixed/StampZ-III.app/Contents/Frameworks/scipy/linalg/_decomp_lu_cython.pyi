@@ -1,0 +1,1 @@
+../../../Resources/scipy/linalg/_decomp_lu_cython.pyi

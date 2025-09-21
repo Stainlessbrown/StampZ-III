@@ -1,0 +1,1 @@
+../../../Resources/scipy/special/cython_special.pxd

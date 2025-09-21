@@ -1,0 +1,1 @@
+../../../Resources/scipy/linalg/_matfuncs_expm.pyi

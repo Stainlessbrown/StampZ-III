@@ -1,0 +1,1 @@
+../../../Resources/scipy/linalg/cython_lapack.pxd

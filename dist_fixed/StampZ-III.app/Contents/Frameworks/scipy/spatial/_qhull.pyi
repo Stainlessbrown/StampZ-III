@@ -1,0 +1,1 @@
+../../../Resources/scipy/spatial/_qhull.pyi
