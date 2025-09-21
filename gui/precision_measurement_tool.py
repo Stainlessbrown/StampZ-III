@@ -170,7 +170,7 @@ class PrecisionMeasurementTool:
         
         # DPI info
         if self.measurement_engine.dpi:
-            ttk.Label(cal_frame, text=f"DPI: {self.measurement_engine.dpi:.1f}",
+            ttk.Label(cal_frame, text=f"DPI: {float(self.measurement_engine.dpi):.1f}",
                      font=("Arial", 9, "bold")).pack()
             ttk.Label(cal_frame, text=f"Source: {self.measurement_engine.calibration_source}",
                      font=("Arial", 8)).pack()
@@ -419,7 +419,9 @@ class PrecisionMeasurementTool:
         
         # Set title with image info
         if self.measurement_engine.dpi:
-            title = f"{os.path.basename(self.image_path)} - {self.measurement_engine.dpi:.0f} DPI"
+            # Convert DPI to float to handle IFDRational objects from TIFF metadata
+            dpi_value = float(self.measurement_engine.dpi)
+            title = f"{os.path.basename(self.image_path)} - {dpi_value:.0f} DPI"
         else:
             title = f"{os.path.basename(self.image_path)}"
             
@@ -896,8 +898,8 @@ class PrecisionMeasurementTool:
                           f"Calibration updated!\n\n"
                           f"Reference measurement: {known_mm}mm\n"
                           f"Pixel distance: {pixel_distance:.1f} pixels\n\n"
-                          f"Old DPI: {old_dpi:.1f}\n"
-                          f"New DPI: {self.measurement_engine.dpi:.1f}\n"
+                          f"Old DPI: {float(old_dpi):.1f}\n"
+                          f"New DPI: {float(self.measurement_engine.dpi):.1f}\n"
                           f"Precision: ±{self.measurement_engine.precision_um:.1f}µm")
                           
     def toggle_auto_label(self):
@@ -924,7 +926,7 @@ class PrecisionMeasurementTool:
         
         messagebox.showinfo("DPI Set", 
                           f"DPI updated!\n\n"
-                          f"Old DPI: {old_dpi:.1f}\n"
+                          f"Old DPI: {float(old_dpi):.1f}\n"
                           f"New DPI: {new_dpi:.1f}\n"
                           f"Precision: ±{self.measurement_engine.precision_um:.1f}µm\n\n"
                           f"All measurements will now use {new_dpi} DPI")
@@ -1007,7 +1009,7 @@ class PrecisionMeasurementTool:
                 )
             
             data = {
-                "DPI": f"{self.measurement_engine.dpi:.1f}",
+                "DPI": f"{float(self.measurement_engine.dpi):.1f}",
                 "Calibration Source": self.measurement_engine.calibration_source,
                 "Precision": f"±{self.measurement_engine.precision_um:.1f}µm",
                 "Number of Measurements": len(self.measurements),
@@ -1086,7 +1088,7 @@ class PrecisionMeasurementTool:
         report += f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n"
         
         if self.measurement_engine.dpi:
-            report += f"Calibration: {self.measurement_engine.dpi:.1f} DPI\\n"
+            report += f"Calibration: {float(self.measurement_engine.dpi):.1f} DPI\\n"
             report += f"Source: {self.measurement_engine.calibration_source}\\n"
             if self.measurement_engine.precision_um:
                 report += f"Precision: ±{self.measurement_engine.precision_um:.1f}µm\\n"

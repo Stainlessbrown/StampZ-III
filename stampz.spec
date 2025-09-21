@@ -199,8 +199,8 @@ if os.path.exists('plot3d/zoom_presets.json'):
 hiddenimports += ['initialize_env', 'launch_selector']
 
 a = Analysis(
-    ['main.py', 'initialize_env.py', 'launch_selector.py'],  # Explicitly include these modules
-    pathex=[],
+    ['main.py', 'initialize_env.py', 'launch_selector.py', 'gui/gauge_perforation_ui.py', 'gui/perforation_ui.py'],  # Explicitly include these modules
+    pathex=['.'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

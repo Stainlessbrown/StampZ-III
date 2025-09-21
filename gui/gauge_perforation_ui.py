@@ -337,13 +337,13 @@ class GaugePerforationDialog:
             dpi = int(self.dpi_var.get()) if self.dpi_var.get().isdigit() else 800
             self.gauge_system = FinalPerforationGauge(dpi=dpi)
             
-        # Enable fit to window button
-        self.fit_window_btn.configure(state='normal')
+            # Enable fit to window button
+            self.fit_window_btn.configure(state='normal')
             
             # Set auto-fit enabled state
             self._auto_fit_enabled = self.auto_fit_var.get()
             
-        # Skip auto-fit for testing
+            # Skip auto-fit for testing
             
             self.status_var.set(f"Image loaded - {img_width}x{img_height} pixels (scale: {self.scale_factor:.2f}x)")
             

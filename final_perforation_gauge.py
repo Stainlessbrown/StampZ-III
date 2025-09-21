@@ -152,13 +152,18 @@ class FinalPerforationGauge:
                     (255, 255, 255, alpha), thickness)
     
     def _draw_dots(self, overlay, dot_positions, scale):
-        """Draw white dots on top of everything."""
+        """Draw white dots with black centers on top of everything."""
         dot_radius = max(3, int(4 * scale))
+        center_radius = max(1, int(1.5 * scale))  # Small black center dot
         
         for dots in dot_positions.values():
             for x, y in dots:
+                # Draw white dot first
                 cv2.circle(overlay, (int(x), int(y)), dot_radius, 
                           (255, 255, 255, 255), -1)
+                # Draw small black center dot for visibility
+                cv2.circle(overlay, (int(x), int(y)), center_radius, 
+                          (0, 0, 0, 255), -1)
     
     def _draw_text_column(self, overlay, scale):
         """Draw uniform background column and text labels."""

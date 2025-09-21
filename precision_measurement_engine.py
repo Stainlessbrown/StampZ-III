@@ -110,7 +110,7 @@ class MeasurementEngine:
                         else:
                             dpi = float(x_res)
                         self.calibration_source = "TIFF XResolution tag"
-                        print(f"Found TIFF XRes: {dpi} from {x_res}")
+                        print(f"Found TIFF XRes: {dpi} from {str(x_res)}")
                         
                     # Method 4b: Resolution unit tag (296) + resolution
                     elif 296 in self.image.tag_v2 and 282 in self.image.tag_v2:
@@ -122,7 +122,7 @@ class MeasurementEngine:
                             else:
                                 dpi = float(x_res)
                             self.calibration_source = "TIFF Resolution + Unit tags"
-                            print(f"Found TIFF Res+Unit: {dpi} from {x_res}, unit={unit}")
+                            print(f"Found TIFF Res+Unit: {dpi} from {str(x_res)}, unit={unit}")
                             
                 # Method 4c: Try tag dictionary directly
                 if (dpi is None or dpi < 50) and hasattr(self.image, 'tag'):
@@ -134,7 +134,7 @@ class MeasurementEngine:
                                 if potential_dpi >= 50:  # Reasonable DPI value
                                     dpi = potential_dpi
                                     self.calibration_source = "TIFF tag dictionary"
-                                    print(f"Found TIFF tag {tag_id}: {dpi} from {tag_value}")
+                                    print(f"Found TIFF tag {tag_id}: {dpi} from {str(tag_value)}")
                                     break
             except Exception as e:
                 print(f"TIFF DPI extraction error: {e}")
