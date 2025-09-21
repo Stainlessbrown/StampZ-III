@@ -147,8 +147,8 @@ class TernaryPlotWindow:
         self.canvas.mpl_connect('button_press_event', self._on_plot_click)
         
         # Enhanced navigation toolbar with zoom/pan for dense data points
-        nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
-        nav_toolbar.update()
+        self.nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
+        self.nav_toolbar.update()
         
         # Add toolbar info
         nav_info = ttk.Label(plot_frame, text="💡 Use toolbar above to zoom/pan when points overlap", 
@@ -161,11 +161,11 @@ class TernaryPlotWindow:
     
     def _create_toolbar(self, parent):
         """Create toolbar similar to Plot_3D."""
-        toolbar = ttk.Frame(parent)
-        toolbar.pack(fill=tk.X, pady=(0, 5))
+        self.toolbar = ttk.Frame(parent)
+        self.toolbar.pack(fill=tk.X, pady=(0, 5))
         
         # Left side - Data controls
-        left_frame = ttk.Frame(toolbar)
+        left_frame = ttk.Frame(self.toolbar)
         left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         ttk.Label(left_frame, text="Sample Set:").pack(side=tk.LEFT, padx=(0, 5))
@@ -173,7 +173,11 @@ class TernaryPlotWindow:
         
         ttk.Button(left_frame, text="Load Database", command=self._load_data_dialog).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(left_frame, text="Load External File", command=self._load_external_file).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_frame, text="Refresh", command=self._refresh_plot).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Button(left_frame, text="Refresh Plot", command=self._refresh_plot_only).pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Datasheet sync button (initially hidden)
+        self.refresh_from_datasheet_btn = ttk.Button(left_frame, text="↻ Sync from Datasheet", command=self._refresh_from_datasheet)
+        # Don't pack initially - will be shown when datasheet is opened
         
         # Middle - Visualization options
         middle_frame = ttk.Frame(toolbar)
@@ -213,19 +217,20 @@ class TernaryPlotWindow:
     def _refresh_plot(self):
         """Refresh the ternary plot with current settings.
         
-        If linked to a datasheet, optionally sync from datasheet data.
+        Legacy method - maintains original behavior for backward compatibility.
         """
-        # Check if we should sync from linked datasheet
+        # This is now just a redirection to the appropriate method based on context
         if self.datasheet_ref and hasattr(self.datasheet_ref, 'sheet'):
-            try:
-                self._sync_from_datasheet()
-            except Exception as e:
-                logger.warning(f"Could not sync from datasheet: {e}")
-                # Continue with existing data
-        
+            self._refresh_from_datasheet()
+        else:
+            self._refresh_plot_only()
+    
+    def _refresh_plot_only(self):
+        """Refresh only the plot without syncing from datasheet."""
+        # This refreshes the plot using current color_points without datasheet sync
         if not self.color_points:
             self.ax.clear()
-            self.ax.text(0.5, 0.5, 'No data available\nUse "Load Data" to load sample set', 
+            self.ax.text(0.5, 0.5, 'No data available\nUse "Load Database" to load sample set', 
                         ha='center', va='center', transform=self.ax.transAxes, fontsize=14)
             self.canvas.draw()
             return
@@ -246,12 +251,28 @@ class TernaryPlotWindow:
             self.ax.axis('off')
             self.canvas.draw()
             
-            data_source = "(synced from datasheet)" if hasattr(self, 'datasheet_ref') and self.datasheet_ref else ""
-            self._update_status(f"Plot updated: {len(self.color_points)} points {data_source}")
+            self._update_status(f"Plot refreshed: {len(self.color_points)} points")
             
         except Exception as e:
             logger.exception("Error refreshing plot")
             self._update_status(f"Plot error: {e}")
+    
+    def _refresh_from_datasheet(self):
+        """Refresh the plot by syncing data from linked datasheet."""
+        if not self.datasheet_ref or not hasattr(self.datasheet_ref, 'sheet'):
+            self._update_status("No datasheet linked for sync")
+            return
+        
+        try:
+            self._sync_from_datasheet()
+            # Now refresh the plot with the synced data
+            self._refresh_plot_only()
+            self._update_status(f"Plot updated from datasheet: {len(self.color_points)} points")
+        except Exception as e:
+            logger.exception("Failed to sync from datasheet")
+            self._update_status(f"Datasheet sync error: {e}")
+            # Fall back to regular refresh
+            self._refresh_plot_only()
     
     def _draw_ternary_framework(self):
         """Draw ternary triangle framework."""
@@ -353,10 +374,19 @@ class TernaryPlotWindow:
         if not self.color_points:
             return
         
-        # Extract coordinates and colors
-        x_coords = [point.ternary_coords[0] for point in self.color_points]
-        y_coords = [point.ternary_coords[1] for point in self.color_points]
-        colors = [tuple(c/255.0 for c in point.rgb) for point in self.color_points]
+        # Extract coordinates and colors, ensure ternary coordinates are computed
+        x_coords = []
+        y_coords = []
+        colors = []
+        
+        for point in self.color_points:
+            # Ensure ternary coordinates are computed
+            if not hasattr(point, 'ternary_coords') or point.ternary_coords is None:
+                point.ternary_coords = self.ternary_plotter.rgb_to_ternary(point.rgb)
+            
+            x_coords.append(point.ternary_coords[0])
+            y_coords.append(point.ternary_coords[1])
+            colors.append(tuple(c/255.0 for c in point.rgb))
         
         # Create size and edge color arrays for highlighting selected points
         sizes = []
@@ -500,6 +530,20 @@ class TernaryPlotWindow:
         if self.show_clusters.get():
             self._compute_clusters()
             self._refresh_plot()
+    
+    def _rgb_to_ternary_coords(self, rgb):
+        """Convert RGB values to ternary coordinates."""
+        return self.ternary_plotter.rgb_to_ternary(rgb)
+    
+    def _show_datasheet_sync_button(self):
+        """Show the datasheet sync button when a datasheet is linked."""
+        if hasattr(self, 'refresh_from_datasheet_btn'):
+            self.refresh_from_datasheet_btn.pack(side=tk.LEFT, padx=(5, 15))
+    
+    def _hide_datasheet_sync_button(self):
+        """Hide the datasheet sync button when no datasheet is linked."""
+        if hasattr(self, 'refresh_from_datasheet_btn'):
+            self.refresh_from_datasheet_btn.pack_forget()
     
     def _load_data_dialog(self):
         """Open dialog to load different sample set."""
@@ -993,6 +1037,9 @@ class TernaryPlotWindow:
             # Store reference for bidirectional updates
             self.datasheet_ref = datasheet
             
+            # Show the "Sync from Datasheet" button now that datasheet is linked
+            self._show_datasheet_sync_button()
+            
             # Add back-reference to datasheet for navigation
             datasheet.ternary_window_ref = self
             
@@ -1074,6 +1121,12 @@ class TernaryPlotWindow:
                 l_norm = max(0.0, min(1.0, point.lab[0] / 100.0))  # L*: 0-100 → 0-1
                 a_norm = max(0.0, min(1.0, (point.lab[1] + 127.5) / 255.0))  # a*: -127.5 to +127.5 → 0-1  
                 b_norm = max(0.0, min(1.0, (point.lab[2] + 127.5) / 255.0))  # b*: -127.5 to +127.5 → 0-1
+                
+                # Store original RGB in metadata for accurate reconstruction
+                if not hasattr(point, 'metadata'):
+                    point.metadata = {}
+                point.metadata['original_rgb'] = point.rgb
+                point.metadata['original_ternary_coords'] = point.ternary_coords
                 
                 # Create row data in Plot_3D format
                 row_data = [
@@ -1187,11 +1240,25 @@ class TernaryPlotWindow:
                     
                     # Try to use original RGB from existing points first to maintain accuracy
                     rgb = None
+                    original_ternary_coords = None
+                    
                     if hasattr(self, 'color_points') and len(updated_color_points) < len(self.color_points):
                         # Use original point RGB to preserve ternary accuracy
                         original_point = self.color_points[len(updated_color_points)]
-                        rgb = original_point.rgb
-                        logger.debug(f"Using original RGB: {rgb}")
+                        
+                        # Check if we have preserved RGB in metadata
+                        if (hasattr(original_point, 'metadata') and 
+                            'original_rgb' in original_point.metadata):
+                            rgb = original_point.metadata['original_rgb']
+                            logger.debug(f"Using preserved RGB from metadata: {rgb}")
+                        else:
+                            rgb = original_point.rgb
+                            logger.debug(f"Using original RGB: {rgb}")
+                        
+                        # Also preserve original ternary coordinates if available
+                        if (hasattr(original_point, 'metadata') and 
+                            'original_ternary_coords' in original_point.metadata):
+                            original_ternary_coords = original_point.metadata['original_ternary_coords']
                     
                     if rgb is None:
                         # Convert L*a*b* to RGB for ternary coordinates
@@ -1211,11 +1278,25 @@ class TernaryPlotWindow:
                             b = max(0, min(255, l_norm * 255 - (b_norm - 0.5) * 100))
                             rgb = (r, g, b)
                     
-                    # Calculate ternary coordinates
-                    ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
+                    # Calculate ternary coordinates - use preserved if available
+                    if original_ternary_coords is not None:
+                        ternary_coords = original_ternary_coords
+                        logger.debug(f"Using preserved ternary coords: {ternary_coords}")
+                    else:
+                        ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
                     
-                    # Create ColorPoint object with metadata
+                    # Create ColorPoint object with preserved metadata
                     metadata = {'source': 'datasheet_sync', 'original_rgb': rgb}
+                    if original_ternary_coords is not None:
+                        metadata['original_ternary_coords'] = original_ternary_coords
+                    
+                    # Preserve any additional metadata from original point
+                    if (hasattr(self, 'color_points') and len(updated_color_points) < len(self.color_points) and
+                        hasattr(self.color_points[len(updated_color_points)], 'metadata')):
+                        original_metadata = self.color_points[len(updated_color_points)].metadata
+                        for key, value in original_metadata.items():
+                            if key not in metadata:  # Don't overwrite our sync metadata
+                                metadata[key] = value
                     
                     color_point = ColorPoint(
                         id=data_id,
