@@ -180,7 +180,7 @@ class TernaryPlotWindow:
         # Don't pack initially - will be shown when datasheet is opened
         
         # Middle - Visualization options
-        middle_frame = ttk.Frame(toolbar)
+        middle_frame = ttk.Frame(self.toolbar)
         middle_frame.pack(side=tk.LEFT)
         
         ttk.Checkbutton(middle_frame, text="Convex Hull", variable=self.show_hull, 
@@ -195,7 +195,7 @@ class TernaryPlotWindow:
         cluster_spin.pack(side=tk.LEFT, padx=(0, 15))
         
         # Right side - Export controls
-        right_frame = ttk.Frame(toolbar)
+        right_frame = ttk.Frame(self.toolbar)
         right_frame.pack(side=tk.RIGHT)
         
         ttk.Button(right_frame, text="Save Plot", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
