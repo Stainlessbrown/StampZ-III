@@ -876,7 +876,8 @@ class ColorComparisonManager(tk.Frame):
     def _show_export_type_selection_dialog(self, available_sets):
         """Show dialog to select export type (individual, averaged, or both)."""
         try:
-            from tkinter import Toplevel, Label, Frame, Button
+            from tkinter import Toplevel, Label, Frame
+            from tkinter import ttk
             
             dialog = Toplevel(self)
             dialog.title("Export to Unified Data Logger")
@@ -922,40 +923,32 @@ class ColorComparisonManager(tk.Frame):
             options_frame.pack(fill="x", padx=40, pady=(0, 20))
             
             # Individual measurements button
-            Button(
+            ttk.Button(
                 options_frame,
                 text="📝 Export Individual Measurements",
                 command=lambda: self._handle_export_selection("individual", available_sets, dialog),
-                width=35,
-                font=("Arial", 10),
-                bg="#E3F2FD",
-                relief="raised"
+                width=35
             ).pack(pady=5)
             
             # Averaged measurements button
-            Button(
+            ttk.Button(
                 options_frame,
                 text="📊 Export Averaged Measurement",
                 command=lambda: self._handle_export_selection("averaged", available_sets, dialog),
-                width=35,
-                font=("Arial", 10),
-                bg="#E8F5E8",
-                relief="raised"
+                width=35
             ).pack(pady=5)
             
-            # Both measurements button
-            Button(
+            # Both measurements button  
+            ttk.Button(
                 options_frame,
                 text="🎯 Export BOTH Individual & Averaged",
                 command=lambda: self._handle_export_selection("both", available_sets, dialog),
                 width=35,
-                font=("Arial", 10, "bold"),
-                bg="#FFF3E0",
-                relief="raised"
+                style="Accent.TButton"
             ).pack(pady=5)
             
             # Cancel button
-            Button(
+            ttk.Button(
                 dialog,
                 text="Cancel",
                 command=dialog.destroy,
@@ -1024,7 +1017,8 @@ class ColorComparisonManager(tk.Frame):
     def _show_sample_set_selection_dialog(self, available_sets, export_type):
         """Show dialog to select sample set for export (similar to main app)."""
         try:
-            from tkinter import Toplevel, Listbox, Scrollbar, Frame, Label, Button
+            from tkinter import Toplevel, Listbox, Scrollbar, Frame, Label
+            from tkinter import ttk
             
             dialog = Toplevel(self)
             dialog.title(f"Export {export_type.title()} Measurements")
@@ -1103,18 +1097,16 @@ class ColorComparisonManager(tk.Frame):
             button_frame = Frame(dialog)
             button_frame.pack(fill="x", padx=20, pady=(0, 20))
             
-            export_button = Button(
+            export_button = ttk.Button(
                 button_frame, 
                 text=f"Export {export_type.title()}", 
                 command=on_export, 
                 width=15,
-                bg="#4CAF50",
-                fg="white",
-                font=("Arial", 10, "bold")
+                style="Accent.TButton"
             )
             export_button.pack(side="left", padx=(0, 10))
             
-            cancel_button = Button(
+            cancel_button = ttk.Button(
                 button_frame, 
                 text="Cancel", 
                 command=on_cancel, 
