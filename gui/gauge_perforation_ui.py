@@ -102,20 +102,7 @@ class GaugePerforationDialog:
         self.dpi_entry.pack(side=tk.LEFT, padx=5)
         ttk.Button(self.dpi_frame, text="Update", command=self._update_dpi).pack(side=tk.LEFT, padx=5)
         
-        # Color Scheme Selection
-        self.color_frame = ttk.Frame(self.control_frame)
-        ttk.Label(self.color_frame, text="Color Scheme:").pack(side=tk.LEFT)
-        
-        self.color_var = tk.StringVar(value="default")
-        color_combo = ttk.Combobox(
-            self.color_frame,
-            textvariable=self.color_var,
-            values=['default', 'dark_stamps', 'light_stamps'],
-            state='readonly',
-            width=12
-        )
-        color_combo.pack(side=tk.LEFT, padx=5)
-        color_combo.bind('<<ComboboxSelected>>', self._update_color_scheme)
+        # Color Scheme Selection removed - traditional white/black only
         
         # Gauge Orientation
         self.orientation_frame = ttk.Frame(self.control_frame)
@@ -171,13 +158,12 @@ class GaugePerforationDialog:
             text="📁 Load Image", 
             command=self._load_image
         )
-        # Fit to window button disabled for testing
-        # self.fit_window_btn = ttk.Button(
-        #     self.file_frame,
-        #     text="🔍 Fit to Window", 
-        #     command=self._fit_to_window,
-        #     state='disabled'
-        # )
+        self.fit_window_btn = ttk.Button(
+            self.file_frame,
+            text="🔍 Fit to Window",
+            command=self._fit_to_window,
+            state='disabled'
+        )
         
         # Auto-fit checkbox
         self.auto_fit_var = tk.BooleanVar(value=False)  # Disable auto-fit by default to avoid scaling issues
@@ -237,7 +223,6 @@ class GaugePerforationDialog:
         
         # Pack control sections
         self.dpi_frame.pack(fill=tk.X, pady=3)
-        self.color_frame.pack(fill=tk.X, pady=3)
         self.orientation_frame.pack(fill=tk.X, pady=5)
         
         # Gauge buttons
@@ -254,7 +239,7 @@ class GaugePerforationDialog:
         # File operations
         self.file_frame.pack(fill=tk.X, pady=5)
         self.load_image_btn.pack(fill=tk.X, pady=1)
-        # self.fit_window_btn.pack(fill=tk.X, pady=1)  # Disabled for testing
+        self.fit_window_btn.pack(fill=tk.X, pady=1)
         self.auto_fit_check.pack(fill=tk.X, pady=1)
         self.save_data_btn.pack(fill=tk.X, pady=1)
         
@@ -352,8 +337,8 @@ class GaugePerforationDialog:
             dpi = int(self.dpi_var.get()) if self.dpi_var.get().isdigit() else 800
             self.gauge_system = FinalPerforationGauge(dpi=dpi)
             
-        # Enable fit to window button - disabled for testing
-        # self.fit_window_btn.configure(state='normal')
+        # Enable fit to window button
+        self.fit_window_btn.configure(state='normal')
             
             # Set auto-fit enabled state
             self._auto_fit_enabled = self.auto_fit_var.get()
