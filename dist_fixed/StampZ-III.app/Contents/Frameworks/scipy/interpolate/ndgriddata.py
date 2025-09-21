@@ -1,1 +1,0 @@
-../../../Resources/scipy/interpolate/ndgriddata.py

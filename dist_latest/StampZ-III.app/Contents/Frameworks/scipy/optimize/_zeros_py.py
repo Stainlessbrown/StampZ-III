@@ -1,1 +1,0 @@
-../../../Resources/scipy/optimize/_zeros_py.py

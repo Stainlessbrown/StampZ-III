@@ -1,1 +1,0 @@
-../../Resources/matplotlib/_text_helpers.py

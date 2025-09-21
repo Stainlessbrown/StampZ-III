@@ -1,1 +1,0 @@
-../../../Resources/scipy/special/_add_newdocs.py

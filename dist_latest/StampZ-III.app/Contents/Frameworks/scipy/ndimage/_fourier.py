@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/_fourier.py

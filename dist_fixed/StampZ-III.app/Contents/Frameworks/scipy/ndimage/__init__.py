@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/__init__.py

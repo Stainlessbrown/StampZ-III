@@ -1,1 +1,0 @@
-../../Resources/sklearn/discriminant_analysis.py

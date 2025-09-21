@@ -132,6 +132,13 @@ class ColorDataBridge:
                     if 'delta_e' in measurement:
                         metadata['delta_e'] = measurement['delta_e']
                     
+                    # Add ternary-specific preferences (separate from Plot_3D preferences)
+                    # These are used only by ternary plots, maintaining data isolation
+                    ternary_marker = measurement.get('ternary_marker_preference', '.')
+                    ternary_color = measurement.get('ternary_color_preference', 'blue')
+                    metadata['marker'] = ternary_marker
+                    metadata['marker_color'] = ternary_color
+                    
                     # Create ColorPoint object
                     color_point = ColorPoint(
                         id=point_id,

@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .stampz_app import StampZApp
+    from app.stampz_app import StampZApp
 
 logger = logging.getLogger(__name__)
 

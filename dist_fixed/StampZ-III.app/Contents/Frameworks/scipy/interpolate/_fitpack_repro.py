@@ -1,1 +1,0 @@
-../../../Resources/scipy/interpolate/_fitpack_repro.py

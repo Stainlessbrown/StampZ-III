@@ -1,1 +1,0 @@
-../../Resources/matplotlib/_type1font.py

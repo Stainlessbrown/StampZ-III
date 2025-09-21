@@ -1,1 +1,0 @@
-../../../Resources/scipy/fftpack/_pseudo_diffs.py

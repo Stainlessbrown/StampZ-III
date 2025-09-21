@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/_support_alternative_backends.py

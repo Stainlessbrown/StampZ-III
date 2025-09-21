@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/_ndimage_api.py

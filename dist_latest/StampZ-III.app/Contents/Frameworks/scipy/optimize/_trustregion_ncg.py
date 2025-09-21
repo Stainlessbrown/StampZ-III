@@ -1,1 +1,0 @@
-../../../Resources/scipy/optimize/_trustregion_ncg.py

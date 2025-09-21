@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/_ni_docstrings.py

@@ -1208,6 +1208,10 @@ class RealtimePlot3DSheet:
                     if success:
                         updated_count += 1
                         print(f"    ✅ Row {i}: UPDATED {image_name} pt{coord_point} - cluster={cluster_id}, ∆E={delta_e_val}, marker={marker}, color={color}")
+                        
+                        # If this is a ternary datasheet, also save to ternary-specific columns
+                        if hasattr(self, 'ternary_save_callback') and callable(self.ternary_save_callback):
+                            self.ternary_save_callback(row_data)
                     else:
                         # Update failed - this might be NEW DATA that needs INSERTION
                         print(f"    🔄 Row {i}: UPDATE FAILED for {image_name} pt{coord_point} - attempting INSERTION of new data")

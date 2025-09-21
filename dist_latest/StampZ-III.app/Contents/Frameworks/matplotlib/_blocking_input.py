@@ -1,1 +1,0 @@
-../../Resources/matplotlib/_blocking_input.py

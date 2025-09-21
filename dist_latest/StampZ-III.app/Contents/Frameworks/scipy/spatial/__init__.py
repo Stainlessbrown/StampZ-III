@@ -1,1 +1,0 @@
-../../../Resources/scipy/spatial/__init__.py

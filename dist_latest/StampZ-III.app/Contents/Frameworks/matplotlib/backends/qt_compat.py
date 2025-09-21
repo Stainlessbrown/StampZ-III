@@ -1,1 +1,0 @@
-../../../Resources/matplotlib/backends/qt_compat.py

@@ -1,1 +1,0 @@
-../../../Resources/scipy/optimize/optimize.py

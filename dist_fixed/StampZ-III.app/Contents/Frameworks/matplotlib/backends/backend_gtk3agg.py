@@ -1,1 +1,0 @@
-../../../Resources/matplotlib/backends/backend_gtk3agg.py

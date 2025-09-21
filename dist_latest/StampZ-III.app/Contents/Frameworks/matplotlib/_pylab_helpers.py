@@ -1,1 +1,0 @@
-../../Resources/matplotlib/_pylab_helpers.py

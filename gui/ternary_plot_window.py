@@ -201,7 +201,12 @@ class TernaryPlotWindow:
         ttk.Label(middle_frame, text="Clusters:").pack(side=tk.LEFT, padx=(0, 2))
         cluster_spin = ttk.Spinbox(middle_frame, from_=2, to=8, width=3, textvariable=self.n_clusters,
                                   command=self._update_clusters)
-        cluster_spin.pack(side=tk.LEFT, padx=(0, 15))
+        cluster_spin.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Add sphere visualization option
+        self.show_spheres = tk.BooleanVar()
+        ttk.Checkbutton(middle_frame, text="Spheres", variable=self.show_spheres,
+                       command=self._toggle_spheres).pack(side=tk.LEFT, padx=(5, 15))
         
         # Right side - Export controls
         right_frame = ttk.Frame(self.toolbar)
@@ -386,10 +391,10 @@ class TernaryPlotWindow:
         
         # Color map for named colors from datasheet
         color_map = {
-            'red': 'red', 'blue': 'blue', 'green': 'green', 'yellow': 'yellow',
-            'purple': 'purple', 'orange': 'orange', 'pink': 'pink', 'brown': 'brown',
-            'black': 'black', 'white': 'white', 'gray': 'gray', 'grey': 'gray',
-            'cyan': 'cyan', 'magenta': 'magenta'
+            'red': '#FF0000', 'blue': '#0000FF', 'green': '#00FF00', 'yellow': '#FFFF00',
+            'purple': '#800080', 'orange': '#FFA500', 'pink': '#FFC0CB', 'brown': '#A52A2A',
+            'black': '#000000', 'white': '#FFFFFF', 'gray': '#808080', 'grey': '#808080',
+            'cyan': '#00FFFF', 'magenta': '#FF00FF'
         }
         
         # Convert Plot_3D marker symbols to matplotlib symbols
@@ -419,9 +424,9 @@ class TernaryPlotWindow:
             
             # Determine size and edge color based on selection
             if i in getattr(self, 'selected_points', set()):
-                size = 120  # Larger size for selected
-                edgecolor = 'yellow'
-                linewidth = 3
+                size = 150  # Much larger size for selected
+                edgecolor = '#FFD700'  # Gold color for better visibility
+                linewidth = 4  # Thicker border
             else:
                 size = 60  # Normal size
                 edgecolor = 'black'
@@ -444,6 +449,10 @@ class TernaryPlotWindow:
         
         # Plot each marker type separately
         self.plotted_points = {}  # Store for click detection
+        
+        # Plot spheres if requested (as background elements)
+        if self.show_spheres.get():
+            self._plot_spheres()
         
         for marker_style, group_data in marker_groups.items():
             scatter = self.ax.scatter(
@@ -504,6 +513,40 @@ class TernaryPlotWindow:
         except Exception as e:
             logger.warning(f"Convex hull failed: {e}")
     
+    def _plot_spheres(self):
+        """Plot sphere-style cluster visualization as background elements."""
+        if not self.clusters:
+            return
+        
+        # Plot cluster spheres as background elements
+        for i, (label, points) in enumerate(self.clusters.items()):
+            color = self.cluster_colors[i % len(self.cluster_colors)]
+            
+            # Extract coordinates for this cluster
+            x_coords = [p.ternary_coords[0] for p in points]
+            y_coords = [p.ternary_coords[1] for p in points]
+            
+            # Calculate cluster center and spread
+            center_x = np.mean(x_coords)
+            center_y = np.mean(y_coords)
+            
+            # Set sphere radius to represent ΔE (0.02 for normalized coordinates)
+            radius = 0.02  # Fixed radius representing ΔE like in Plot_3D
+            
+            # Draw sphere as a circle
+            circle = plt.Circle((center_x, center_y), radius, 
+                              color=color, alpha=0.15, zorder=1)
+            self.ax.add_patch(circle)
+            
+            # Add subtle centroid marker (smaller and less intrusive)
+            self.ax.scatter(center_x, center_y, 
+                          c=[color], s=60, marker='o', 
+                          edgecolors='black', linewidths=1, 
+                          zorder=2, alpha=0.7, 
+                          label=f'Cluster {label} ({len(points)} pts)')
+        
+        # Legend will be added by the main _plot_clusters method to avoid duplicates
+    
     def _toggle_clusters(self):
         """Toggle K-means cluster display."""
         if self.show_clusters.get():
@@ -534,14 +577,21 @@ class TernaryPlotWindow:
             kmeans = KMeans(n_clusters=n_clusters, random_state=42)
             cluster_labels = kmeans.fit_predict(ternary_coords)
             
-            # Group points by cluster
+            # Group points by cluster and save to database
             self.clusters = {}
             for i, label in enumerate(cluster_labels):
                 if label not in self.clusters:
                     self.clusters[label] = []
                 self.clusters[label].append(self.color_points[i])
+                
+                # Save cluster assignment to database for persistence
+                self._save_cluster_assignment(self.color_points[i].id, int(label))
             
-            self._update_status(f"K-means: {len(self.clusters)} clusters computed")
+            self._update_status(f"K-means: {len(self.clusters)} clusters computed and saved")
+            
+            # Refresh datasheet if it's open to show cluster assignments
+            if hasattr(self, 'datasheet_ref') and self.datasheet_ref:
+                self._refresh_datasheet_cluster_data()
             
         except Exception as e:
             logger.exception("K-means clustering failed")
@@ -549,11 +599,16 @@ class TernaryPlotWindow:
             self.clusters = {}
     
     def _plot_clusters(self):
-        """Plot K-means cluster results."""
+        """Plot K-means cluster results using sphere or convex hull visualization."""
         if not self.clusters:
             return
         
-        # Plot cluster boundaries and centroids
+        # Choose visualization mode based on sphere toggle
+        if self.show_spheres.get():
+            self._plot_spheres()
+            return
+        
+        # Traditional convex hull visualization
         for i, (label, points) in enumerate(self.clusters.items()):
             color = self.cluster_colors[i % len(self.cluster_colors)]
             
@@ -581,15 +636,20 @@ class TernaryPlotWindow:
                 except ImportError:
                     pass  # Skip if scipy not available
             
-            # Plot centroid
+            # Plot improved centroid (smaller and less intrusive than before)
             centroid_x = np.mean(x_coords)
             centroid_y = np.mean(y_coords)
-            self.ax.scatter(centroid_x, centroid_y, c=color, s=150, marker='X', 
-                          edgecolors='black', linewidths=2, zorder=4,
+            self.ax.scatter(centroid_x, centroid_y, c=color, s=100, marker='x', 
+                          edgecolors='black', linewidths=1.5, zorder=4, alpha=0.8,
                           label=f'Cluster {label} ({len(points)} pts)')
         
         # Add legend
         self.ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=9)
+    
+    def _toggle_spheres(self):
+        """Toggle sphere visualization mode."""
+        if self.show_clusters.get():
+            self._refresh_plot()
     
     def _update_clusters(self):
         """Update clusters when spinbox changes."""
@@ -1109,6 +1169,9 @@ class TernaryPlotWindow:
             # Add back-reference to datasheet for navigation
             datasheet.ternary_window_ref = self
             
+            # Add callback for datasheet to save ternary preferences when changes are made
+            datasheet.ternary_save_callback = self._handle_datasheet_changes
+            
             # Add "Return to Ternary" button to datasheet toolbar
             if hasattr(datasheet, 'plot3d_btn') and hasattr(datasheet.plot3d_btn, 'pack_info'):
                 # Add button after the Plot_3D button
@@ -1194,21 +1257,59 @@ class TernaryPlotWindow:
                 point.metadata['original_rgb'] = point.rgb
                 point.metadata['original_ternary_coords'] = point.ternary_coords
                 
+                # Find cluster assignment and centroid for this point
+                cluster_assignment = ''
+                centroid_x = centroid_y = centroid_z = ''
+                sphere_color = sphere_radius = ''
+                if hasattr(self, 'clusters') and self.clusters:
+                    for cluster_id, cluster_points in self.clusters.items():
+                        if point in cluster_points:
+                            cluster_assignment = str(cluster_id)
+                            # Calculate cluster centroid in L*a*b* space
+                            cluster_l = [cp.lab[0] for cp in cluster_points]
+                            cluster_a = [cp.lab[1] for cp in cluster_points]
+                            cluster_b = [cp.lab[2] for cp in cluster_points]
+                            
+                            # Convert centroid to normalized 0-1 range
+                            centroid_l_norm = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
+                            centroid_a_norm = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
+                            centroid_b_norm = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
+                            
+                            centroid_x = centroid_l_norm
+                            centroid_y = centroid_a_norm
+                            centroid_z = centroid_b_norm
+                            
+                            # Get cluster sphere color from matplotlib colormap
+                            import matplotlib.pyplot as plt
+                            import numpy as np
+                            colors = plt.cm.Set3(np.linspace(0, 1, len(self.clusters)))
+                            cluster_idx = list(self.clusters.keys()).index(cluster_id)
+                            cluster_color = colors[cluster_idx]
+                            
+                            # Convert matplotlib color to hex
+                            sphere_color = '#{:02x}{:02x}{:02x}'.format(
+                                int(cluster_color[0] * 255),
+                                int(cluster_color[1] * 255), 
+                                int(cluster_color[2] * 255)
+                            )
+                            sphere_radius = '0.02'  # ΔE radius
+                            break
+                
                 # Create row data in Plot_3D format
                 row_data = [
                     round(l_norm, 6),      # Xnorm (L*)
                     round(a_norm, 6),      # Ynorm (a*) 
                     round(b_norm, 6),      # Znorm (b*)
                     point.id,              # DataID
-                    '',                    # Cluster (empty for user to assign)
+                    cluster_assignment,    # Cluster (from K-means results)
                     '',                    # ∆E (empty - to be calculated)
                     '.',                   # Marker (default)
                     'blue',                # Color (default)
-                    '',                    # Centroid_X (empty)
-                    '',                    # Centroid_Y (empty)
-                    '',                    # Centroid_Z (empty)
-                    '',                    # Sphere (empty)
-                    ''                     # Radius (empty)
+                    centroid_x,            # Centroid_X (cluster centroid)
+                    centroid_y,            # Centroid_Y (cluster centroid)
+                    centroid_z,            # Centroid_Z (cluster centroid)
+                    sphere_color,          # Sphere (cluster color)
+                    sphere_radius          # Radius (∆E = 0.02)
                 ]
                 
                 plot3d_data_rows.append(row_data)
@@ -1266,6 +1367,186 @@ class TernaryPlotWindow:
         except Exception as e:
             logger.warning(f"Could not bring ternary window to front: {e}")
     
+    def _save_ternary_preferences_to_db(self, point_id: str, marker: str = None, color: str = None):
+        """Save ternary-specific marker/color preferences to database."""
+        try:
+            # Parse the point ID to get image_name and coordinate_point
+            if '_pt' in point_id:
+                image_name, pt_part = point_id.rsplit('_pt', 1)
+                coordinate_point = int(pt_part)
+            else:
+                # Single point entries
+                image_name = point_id
+                coordinate_point = 1
+            
+            # Use the database's ternary preference update method
+            from utils.color_analysis_db import ColorAnalysisDB
+            db = ColorAnalysisDB(self.sample_set_name)
+            
+            success = db.update_ternary_preferences(
+                image_name=image_name,
+                coordinate_point=coordinate_point,
+                marker=marker,
+                color=color
+            )
+            
+            if success:
+                logger.debug(f"Saved ternary preferences for {point_id}: marker={marker}, color={color}")
+            else:
+                logger.warning(f"Failed to save ternary preferences for {point_id}")
+                
+            return success
+            
+        except Exception as e:
+            logger.exception(f"Error saving ternary preferences for {point_id}: {e}")
+            return False
+    
+    def _handle_datasheet_changes(self, row_data):
+        """Handle changes from the datasheet and save to ternary-specific columns."""
+        try:
+            if len(row_data) < 8:  # Need at least DataID, Marker, Color columns
+                return
+                
+            data_id = row_data[3]  # DataID column
+            marker = row_data[6] if len(row_data) > 6 else '.'  # Marker column
+            color = row_data[7] if len(row_data) > 7 else 'blue'  # Color column
+            
+            # Save to ternary-specific database columns
+            success = self._save_ternary_preferences_to_db(
+                point_id=data_id,
+                marker=marker,
+                color=color
+            )
+            
+            if success:
+                logger.debug(f"Saved ternary preferences from datasheet: {data_id} -> marker={marker}, color={color}")
+            else:
+                logger.warning(f"Failed to save ternary preferences from datasheet for {data_id}")
+                
+        except Exception as e:
+            logger.exception(f"Error handling datasheet changes: {e}")
+    
+    def _refresh_datasheet_cluster_data(self):
+        """Refresh cluster data in the open datasheet."""
+        try:
+            if not (hasattr(self, 'datasheet_ref') and self.datasheet_ref and hasattr(self.datasheet_ref, 'sheet')):
+                return
+                
+            if not (hasattr(self, 'clusters') and self.clusters):
+                return
+                
+            # Update cluster column for each data row
+            total_rows = self.datasheet_ref.sheet.get_total_rows()
+            
+            for row_idx in range(7, total_rows):  # Start at row 8 (index 7) where data begins
+                try:
+                    row_data = self.datasheet_ref.sheet.get_row_data(row_idx)
+                    if not row_data or len(row_data) < 5:  # Need at least DataID column
+                        continue
+                        
+                    data_id = row_data[3]  # DataID is column 4 (index 3)
+                    if not data_id:
+                        continue
+                        
+                    # Find matching color point and its cluster assignment
+                    matching_point = None
+                    for point in self.color_points:
+                        if point.id == data_id:
+                            matching_point = point
+                            break
+                            
+                    if matching_point:
+                        # Find cluster assignment and centroid data for this point
+                        cluster_assignment = ''
+                        centroid_x = centroid_y = centroid_z = ''
+                        sphere_color = sphere_radius = ''
+                        
+                        for cluster_id, cluster_points in self.clusters.items():
+                            if matching_point in cluster_points:
+                                cluster_assignment = str(cluster_id)
+                                
+                                # Calculate cluster centroid
+                                cluster_l = [cp.lab[0] for cp in cluster_points]
+                                cluster_a = [cp.lab[1] for cp in cluster_points]
+                                cluster_b = [cp.lab[2] for cp in cluster_points]
+                                
+                                centroid_l_norm = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
+                                centroid_a_norm = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
+                                centroid_b_norm = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
+                                
+                                centroid_x = centroid_l_norm
+                                centroid_y = centroid_a_norm
+                                centroid_z = centroid_b_norm
+                                
+                                # Get sphere color
+                                import matplotlib.pyplot as plt
+                                import numpy as np
+                                colors = plt.cm.Set3(np.linspace(0, 1, len(self.clusters)))
+                                cluster_idx = list(self.clusters.keys()).index(cluster_id)
+                                cluster_color = colors[cluster_idx]
+                                
+                                sphere_color = '#{:02x}{:02x}{:02x}'.format(
+                                    int(cluster_color[0] * 255),
+                                    int(cluster_color[1] * 255), 
+                                    int(cluster_color[2] * 255)
+                                )
+                                sphere_radius = '0.02'
+                                break
+                                
+                        # Update the cluster and centroid data if assignment found
+                        if cluster_assignment:
+                            self.datasheet_ref.sheet.set_cell_data(row_idx, 4, cluster_assignment)  # Cluster
+                            if centroid_x:
+                                self.datasheet_ref.sheet.set_cell_data(row_idx, 8, centroid_x)   # Centroid_X
+                                self.datasheet_ref.sheet.set_cell_data(row_idx, 9, centroid_y)   # Centroid_Y
+                                self.datasheet_ref.sheet.set_cell_data(row_idx, 10, centroid_z)  # Centroid_Z
+                            if sphere_color:
+                                self.datasheet_ref.sheet.set_cell_data(row_idx, 11, sphere_color)  # Sphere color
+                                self.datasheet_ref.sheet.set_cell_data(row_idx, 12, sphere_radius) # Sphere radius
+                            
+                except Exception as row_error:
+                    logger.warning(f"Failed to update cluster data for row {row_idx}: {row_error}")
+                    continue
+                    
+            # Refresh the datasheet display
+            if hasattr(self.datasheet_ref.sheet, 'refresh'):
+                self.datasheet_ref.sheet.refresh()
+                
+            logger.info(f"Updated cluster data in datasheet for {len(self.clusters)} clusters")
+            
+        except Exception as e:
+            logger.exception(f"Failed to refresh datasheet cluster data: {e}")
+    
+    def _save_cluster_assignment(self, point_id: str, cluster_id: int):
+        """Save cluster assignment to database for K-means persistence."""
+        try:
+            # Parse the point ID to get image_name and coordinate_point
+            if '_pt' in point_id:
+                image_name, pt_part = point_id.rsplit('_pt', 1)
+                coordinate_point = int(pt_part)
+            else:
+                # Single point entries
+                image_name = point_id
+                coordinate_point = 1
+            
+            # Use the database's update method to save cluster assignment
+            from utils.color_analysis_db import ColorAnalysisDB
+            db = ColorAnalysisDB(self.sample_set_name)
+            
+            success = db.update_plot3d_extended_values(
+                image_name=image_name,
+                coordinate_point=coordinate_point,
+                cluster_id=cluster_id
+            )
+            
+            if success:
+                logger.debug(f"Saved cluster assignment: {point_id} -> cluster {cluster_id}")
+            else:
+                logger.warning(f"Failed to save cluster assignment for {point_id}")
+                
+        except Exception as e:
+            logger.exception(f"Error saving cluster assignment for {point_id}: {e}")
+    
     def _sync_from_datasheet(self):
         """Sync data from linked datasheet back to ternary plot."""
         try:
@@ -1302,6 +1583,14 @@ class TernaryPlotWindow:
                     # Extract marker information from datasheet if available
                     marker_style = str(row[6]) if len(row) > 6 and row[6] != '' else '.'
                     marker_color = str(row[7]) if len(row) > 7 and row[7] != '' else 'blue'
+                    
+                    # CRITICAL: Save ternary preferences to database for persistence
+                    # This maintains separation from Plot_3D preferences
+                    self._save_ternary_preferences_to_db(
+                        point_id=data_id, 
+                        marker=marker_style, 
+                        color=marker_color
+                    )
                     
                     # Convert normalized values back to L*a*b*
                     l_star = x_norm * 100.0  # 0-1 → 0-100
@@ -1419,8 +1708,8 @@ class TernaryPlotWindow:
                     min_distance = distance
                     closest_point_idx = i
         
-        # Only select if click is reasonably close (within 0.08 units for easier clicking)
-        if min_distance < 0.08 and closest_point_idx is not None:
+        # Only select if click is reasonably close (within 0.12 units for easier clicking)
+        if min_distance < 0.12 and closest_point_idx is not None:
             # Toggle selection
             if not hasattr(self, 'selected_points'):
                 self.selected_points = set()
@@ -1432,10 +1721,26 @@ class TernaryPlotWindow:
                 self.selected_points.add(closest_point_idx)
                 point = self.color_points[closest_point_idx]
                 
-                # Build detailed info string
+                # Build detailed info string with dataset info
                 info_parts = []
+                
+                # Extract dataset name from point ID (e.g., "S10_pt1" -> "S10")
+                dataset_name = "Unknown"
+                if '_pt' in point.id:
+                    dataset_name = point.id.split('_pt')[0]
+                elif point.id:
+                    dataset_name = point.id
+                
+                info_parts.append(f"📊 DATASET: {dataset_name}")
                 info_parts.append(f"ID: {point.id}")
                 info_parts.append(f"RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})")
+                
+                # Add cluster info if available
+                if hasattr(self, 'clusters') and self.clusters:
+                    for cluster_id, cluster_points in self.clusters.items():
+                        if point in cluster_points:
+                            info_parts.append(f"🔗 CLUSTER: {cluster_id}")
+                            break
                 
                 if hasattr(point, 'metadata'):
                     if 'marker' in point.metadata and point.metadata['marker']:
@@ -1443,7 +1748,7 @@ class TernaryPlotWindow:
                     if 'marker_color' in point.metadata and point.metadata['marker_color']:
                         info_parts.append(f"Color: {point.metadata['marker_color']}")
                 
-                status_msg = "Selected: " + " | ".join(info_parts)
+                status_msg = "🎯 SELECTED: " + " | ".join(info_parts)
             
             self._update_status(status_msg)
             
@@ -1488,22 +1793,37 @@ class TernaryPlotWindow:
         try:
             from utils.spectral_analyzer import SpectralAnalyzer
             
-            # Create spectral analyzer window
-            analyzer_window = tk.Toplevel(self.window)
-            analyzer_window.title("Spectral Analysis")
-            analyzer_window.geometry("800x600")
+            # Create analyzer instance (no parent parameter needed)
+            spectral_analyzer = SpectralAnalyzer()
             
-            # Center window
-            analyzer_window.transient(self.window)
-            analyzer_window.update_idletasks()
-            x = (analyzer_window.winfo_screenwidth() // 2) - (analyzer_window.winfo_width() // 2)
-            y = (analyzer_window.winfo_screenheight() // 2) - (analyzer_window.winfo_height() // 2)
-            analyzer_window.geometry(f"+{x}+{y}")
-            
-            # Create analyzer instance
-            spectral_analyzer = SpectralAnalyzer(parent=analyzer_window)
-            
-            self._update_status("Spectral analyzer opened")
+            # If we have color points, analyze them
+            if self.color_points:
+                # Convert ColorPoint objects to ColorMeasurement objects for analysis
+                from utils.color_analyzer import ColorMeasurement
+                from datetime import datetime
+                measurements = []
+                for i, point in enumerate(self.color_points):
+                    measurement = ColorMeasurement(
+                        coordinate_id=i,
+                        coordinate_point=1,  # Default to 1 for single point
+                        position=(point.metadata.get('x_position', 0), point.metadata.get('y_position', 0)),
+                        rgb=point.rgb,
+                        lab=point.lab,
+                        sample_area={'id': point.id, 'metadata': point.metadata},
+                        measurement_date=datetime.now().isoformat(),
+                        notes=f"Color point: {point.id}"
+                    )
+                    measurements.append(measurement)
+                
+                # Perform spectral analysis
+                spectral_data = spectral_analyzer.analyze_spectral_response(measurements)
+                
+                # Plot the results
+                spectral_analyzer.plot_spectral_response(spectral_data, interactive=True)
+                
+                self._update_status(f"Spectral analysis complete: {len(measurements)} samples analyzed")
+            else:
+                self._update_status("No color data available for spectral analysis")
             
         except ImportError:
             messagebox.showwarning(

@@ -1,1 +1,0 @@
-../../../Resources/sklearn/datasets/_olivetti_faces.py

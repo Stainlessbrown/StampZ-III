@@ -1,1 +1,0 @@
-../../Resources/scipy/version.py

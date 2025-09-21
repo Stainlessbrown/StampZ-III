@@ -1,1 +1,0 @@
-../../../Resources/scipy/ndimage/interpolation.py

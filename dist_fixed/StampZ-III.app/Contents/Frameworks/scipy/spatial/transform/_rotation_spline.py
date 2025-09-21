@@ -1,1 +1,0 @@
-../../../../Resources/scipy/spatial/transform/_rotation_spline.py

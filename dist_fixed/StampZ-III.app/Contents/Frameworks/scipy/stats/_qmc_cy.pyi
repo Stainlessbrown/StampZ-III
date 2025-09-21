@@ -1,1 +1,0 @@
-../../../Resources/scipy/stats/_qmc_cy.pyi

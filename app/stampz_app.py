@@ -19,10 +19,10 @@ from utils.advanced_color_plots import TernaryPlotter, QuaternaryPlotter
 import webbrowser
 import datetime
 
-from .menu_manager import MenuManager
-from .file_manager import FileManager
-from .analysis_manager import AnalysisManager
-from .settings_manager import SettingsManager
+from app.menu_manager import MenuManager
+from app.file_manager import FileManager
+from app.analysis_manager import AnalysisManager
+from app.settings_manager import SettingsManager
 
 logger = logging.getLogger(__name__)
 

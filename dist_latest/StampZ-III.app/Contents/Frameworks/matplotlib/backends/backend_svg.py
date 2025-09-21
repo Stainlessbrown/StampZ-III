@@ -1,1 +1,0 @@
-../../../Resources/matplotlib/backends/backend_svg.py

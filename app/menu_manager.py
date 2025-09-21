@@ -8,7 +8,7 @@ import tkinter as tk
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .stampz_app import StampZApp
+    from app.stampz_app import StampZApp
 
 
 class MenuManager:

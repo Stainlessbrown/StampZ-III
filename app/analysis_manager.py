@@ -18,7 +18,7 @@ import numpy as np
 from pathlib import Path
 
 if TYPE_CHECKING:
-    from .stampz_app import StampZApp
+    from app.stampz_app import StampZApp
 
 logger = logging.getLogger(__name__)
 

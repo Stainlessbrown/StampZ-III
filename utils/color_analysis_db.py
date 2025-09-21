@@ -136,6 +136,19 @@ class ColorAnalysisDB:
             except sqlite3.OperationalError:
                 pass  # Column already exists
             
+            # Add separate ternary plot preference columns for data isolation
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN ternary_marker_preference TEXT DEFAULT '.'")
+                print("Added ternary_marker_preference column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                cursor.execute("ALTER TABLE color_measurements ADD COLUMN ternary_color_preference TEXT DEFAULT 'blue'")
+                print("Added ternary_color_preference column")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
             # Add Plot_3D extended columns for complete integration
             try:
                 cursor.execute("ALTER TABLE color_measurements ADD COLUMN cluster_id INTEGER")
@@ -392,7 +405,7 @@ class ColorAnalysisDB:
                             'trendline_valid': bool(row[29]) if len(row) > 29 and row[29] is not None else True
                         })
                 else:
-                    # Query without averaged columns (for main databases) - include all Plot_3D columns
+                    # Query without averaged columns (for main databases) - include all Plot_3D and ternary columns
                     cursor = conn.execute("""
                         SELECT 
                             m.id, m.set_id, s.image_name, m.measurement_date,
@@ -402,7 +415,8 @@ class ColorAnalysisDB:
                             m.sample_type, m.sample_size, m.sample_anchor,
                             m.notes, m.marker_preference, m.color_preference,
                             m.cluster_id, m.delta_e, m.centroid_x, m.centroid_y, m.centroid_z,
-                            m.sphere_color, m.sphere_radius, m.trendline_valid
+                            m.sphere_color, m.sphere_radius, m.trendline_valid,
+                            m.ternary_marker_preference, m.ternary_color_preference
                         FROM color_measurements m
                         JOIN measurement_sets s ON m.set_id = s.set_id
                         ORDER BY m.id
@@ -438,6 +452,8 @@ class ColorAnalysisDB:
                             'sphere_color': row[24] if len(row) > 24 and row[24] else '',
                             'sphere_radius': row[25] if len(row) > 25 and row[25] is not None else None,
                             'trendline_valid': bool(row[26]) if len(row) > 26 and row[26] is not None else True,
+                            'ternary_marker_preference': row[27] if len(row) > 27 and row[27] else '.',
+                            'ternary_color_preference': row[28] if len(row) > 28 and row[28] else 'blue',
                             'is_averaged': False,  # Main DB only contains individual measurements
                             'source_samples_count': None,
                             'source_sample_ids': None
@@ -556,7 +572,7 @@ class ColorAnalysisDB:
     
     def update_marker_color_preferences(self, image_name: str, coordinate_point: int, 
                                        marker: str = None, color: str = None) -> bool:
-        """Update marker and color preferences for a specific measurement.
+        """Update Plot_3D marker and color preferences for a specific measurement.
         
         Args:
             image_name: Name of the image
@@ -599,14 +615,69 @@ class ColorAnalysisDB:
                 updated_rows = cursor.rowcount
                 
                 if updated_rows > 0:
-                    print(f"Updated preferences for {image_name} point {coordinate_point}: marker={marker}, color={color}")
+                    print(f"Updated Plot_3D preferences for {image_name} point {coordinate_point}: marker={marker}, color={color}")
                     return True
                 else:
                     print(f"No measurement found for {image_name} point {coordinate_point}")
                     return False
                     
         except sqlite3.Error as e:
-            print(f"Error updating marker/color preferences: {e}")
+            print(f"Error updating Plot_3D marker/color preferences: {e}")
+            return False
+    
+    def update_ternary_preferences(self, image_name: str, coordinate_point: int, 
+                                  marker: str = None, color: str = None) -> bool:
+        """Update ternary plot-specific marker and color preferences for a specific measurement.
+        
+        Args:
+            image_name: Name of the image
+            coordinate_point: Which coordinate point (1-based)
+            marker: Ternary marker preference (e.g., '.', 'o', '*', 's', '^')
+            color: Ternary color preference (e.g., 'blue', 'red', 'green')
+            
+        Returns:
+            True if update was successful
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Build update query for only provided values
+                update_parts = []
+                values = []
+                
+                if marker is not None:
+                    update_parts.append("ternary_marker_preference = ?")
+                    values.append(marker)
+                
+                if color is not None:
+                    update_parts.append("ternary_color_preference = ?")
+                    values.append(color)
+                
+                if not update_parts:
+                    return True  # Nothing to update
+                
+                # Add WHERE clause values
+                values.extend([image_name, coordinate_point])
+                
+                query = f"""
+                    UPDATE color_measurements 
+                    SET {', '.join(update_parts)}
+                    WHERE set_id = (
+                        SELECT set_id FROM measurement_sets WHERE image_name = ?
+                    ) AND coordinate_point = ?
+                """
+                
+                cursor = conn.execute(query, values)
+                updated_rows = cursor.rowcount
+                
+                if updated_rows > 0:
+                    print(f"Updated ternary preferences for {image_name} point {coordinate_point}: marker={marker}, color={color}")
+                    return True
+                else:
+                    print(f"No measurement found for {image_name} point {coordinate_point}")
+                    return False
+                    
+        except sqlite3.Error as e:
+            print(f"Error updating ternary marker/color preferences: {e}")
             return False
     
     def insert_new_measurement(self, image_name: str, coordinate_point: int,

@@ -1,1 +1,0 @@
-../../Resources/matplotlib/_cm_listed.py

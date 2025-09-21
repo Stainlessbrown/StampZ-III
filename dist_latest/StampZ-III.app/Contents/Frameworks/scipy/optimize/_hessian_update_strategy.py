@@ -1,1 +1,0 @@
-../../../Resources/scipy/optimize/_hessian_update_strategy.py

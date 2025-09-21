@@ -1,1 +1,0 @@
-../../../Resources/scipy/io/__init__.py

@@ -1,1 +1,0 @@
-../../../Resources/scipy/linalg/_decomp_schur.py
