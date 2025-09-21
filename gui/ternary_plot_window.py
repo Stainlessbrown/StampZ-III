@@ -41,6 +41,21 @@ logger = logging.getLogger(__name__)
 class TernaryPlotWindow:
     """Plot_3D-style window for ternary plot visualization with K-means clustering."""
     
+    # Dictionary of marker sizes for different marker types (same as Plot_3D)
+    MARKER_SIZES = {
+        '.': 25,  # Dot
+        'o': 25,  # Circle
+        '*': 60,  # Star
+        '^': 40,  # Triangle up
+        '<': 40,  # Triangle left
+        '>': 40,  # Triangle right
+        'v': 40,  # Triangle down
+        's': 40,  # Square
+        'D': 40,  # Diamond
+        '+': 50,  # Plus (increased for better visibility)
+        'x': 40,  # Cross (increased for better visibility)
+    }
+    
     def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None, app_ref=None):
         """Initialize ternary plot window.
         
@@ -422,13 +437,16 @@ class TernaryPlotWindow:
                 # Use RGB color of the point
                 point_color = tuple(c/255.0 for c in point.rgb)
             
+            # Get marker-specific base size from dictionary (like Plot_3D)
+            base_size = self.MARKER_SIZES.get(marker_style, 25)
+            
             # Determine size and edge color based on selection
             if i in getattr(self, 'selected_points', set()):
-                size = 150  # Much larger size for selected
+                size = base_size * 6  # Much larger size for selected (6x multiplier)
                 edgecolor = '#FFD700'  # Gold color for better visibility
                 linewidth = 4  # Thicker border
             else:
-                size = 60  # Normal size
+                size = base_size  # Use marker-specific size
                 edgecolor = 'black'
                 linewidth = 0.5
             

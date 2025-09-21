@@ -3,6 +3,7 @@
 # PyInstaller build artifacts
 build/
 dist/
+dist_*/
 # Allow stampz.spec to be tracked
 !stampz.spec
 *.icns
