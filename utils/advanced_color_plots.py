@@ -194,13 +194,35 @@ class TernaryPlotter:
         triangle_y = [coords['green'][1], coords['blue'][1], coords['red'][1], coords['green'][1]]
         ax.plot(triangle_x, triangle_y, 'k-', linewidth=2)
         
-        # Add vertex labels
-        ax.text(coords['red'][0], coords['red'][1] + 0.05, 'RED\n100%', 
-               ha='center', va='bottom', fontweight='bold', fontsize=12)
-        ax.text(coords['green'][0] - 0.05, coords['green'][1], 'GREEN\n100%', 
-               ha='right', va='center', fontweight='bold', fontsize=12)
-        ax.text(coords['blue'][0] + 0.05, coords['blue'][1], 'BLUE\n100%', 
-               ha='left', va='center', fontweight='bold', fontsize=12)
+        # Add vertex labels with enhanced styling
+        ax.text(coords['red'][0], coords['red'][1] + 0.08, 'RED\n100%', 
+               ha='center', va='bottom', fontweight='bold', fontsize=14, 
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.2))
+        ax.text(coords['green'][0] - 0.08, coords['green'][1], 'GREEN\n100%', 
+               ha='right', va='center', fontweight='bold', fontsize=14,
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.2))
+        ax.text(coords['blue'][0] + 0.08, coords['blue'][1], 'BLUE\n100%', 
+               ha='left', va='center', fontweight='bold', fontsize=14,
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='blue', alpha=0.2))
+        
+        # Add edge labels to clarify reading directions
+        # Red-Green edge (bottom)
+        mid_rg_x = (coords['red'][0] + coords['green'][0]) / 2
+        mid_rg_y = (coords['red'][1] + coords['green'][1]) / 2 - 0.06
+        ax.text(mid_rg_x, mid_rg_y, 'Blue content increases ↑', 
+               ha='center', va='top', fontsize=10, style='italic', alpha=0.8)
+        
+        # Red-Blue edge (right)
+        mid_rb_x = (coords['red'][0] + coords['blue'][0]) / 2 + 0.06
+        mid_rb_y = (coords['red'][1] + coords['blue'][1]) / 2
+        ax.text(mid_rb_x, mid_rb_y, 'Green\ncontent\nincreases\n←', 
+               ha='left', va='center', fontsize=10, style='italic', alpha=0.8)
+        
+        # Green-Blue edge (left)
+        mid_gb_x = (coords['green'][0] + coords['blue'][0]) / 2 - 0.06
+        mid_gb_y = (coords['green'][1] + coords['blue'][1]) / 2
+        ax.text(mid_gb_x, mid_gb_y, 'Red\ncontent\nincreases\n→', 
+               ha='right', va='center', fontsize=10, style='italic', alpha=0.8)
         
         # Draw grid lines (percentage lines)
         self._draw_ternary_grid(ax)
@@ -556,8 +578,8 @@ def demo_advanced_plotting():
     if HAS_PLOTLY:
         print("🎯 Creating 3D L*a*b* Plot...")
         quaternary_plotter = QuaternaryPlotter()
-        fig_3d = quaternary_plotter.create_lab_3d_plot(sample_colors, 
-                                                      title="StampZ Colors - L*a*b* Space")
+        fig_3d = quaternary_plotter.create_lab_scatter(sample_colors, 
+                                                     title="StampZ Colors - L*a*b* Space")
     
     # Demonstrate clustering
     if HAS_SKLEARN:
@@ -574,8 +596,8 @@ def demo_advanced_plotting():
         cluster_results = analyzer.cluster_by_families(sample_colors, method="combined")
         print(f"  Found {cluster_results.get('n_clusters', 0)} color families")
         
-        for family_name, family_info in cluster_results.get('clusters', {}).items():
-            print(f"    {family_name}: {family_info['size']} stamps")
+        for family_name, family_points in cluster_results.get('clusters', {}).items():
+            print(f"    {family_name}: {len(family_points)} stamps")
     
     print("\n✅ Advanced Plotting Demo Complete!")
     print("\n🚀 Integration Benefits:")

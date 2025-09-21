@@ -14,6 +14,10 @@ from gui.controls_reorganized import ReorganizedControlPanel as ControlPanel
 from utils.recent_files import RecentFilesManager
 from utils.image_straightener import StraighteningTool
 from utils.path_utils import ensure_data_directories
+from utils.color_data_bridge import ColorDataBridge
+from utils.advanced_color_plots import TernaryPlotter, QuaternaryPlotter
+import webbrowser
+import datetime
 
 from .menu_manager import MenuManager
 from .file_manager import FileManager
@@ -69,6 +73,11 @@ class StampZApp:
         
         # Check optional dependencies at startup
         self.settings_manager.check_dependencies()
+        
+        # Initialize advanced color components
+        self._color_bridge = ColorDataBridge()
+        self._ternary_plotter = TernaryPlotter()
+        self._quaternary_plotter = QuaternaryPlotter()
 
     def _set_application_name(self):
         """Set the application name for the system."""
@@ -197,8 +206,244 @@ class StampZApp:
     def export_with_library_matches(self):
         """Delegate to analysis manager."""
         return self.analysis_manager.export_with_library_matches()
-        
+    
     def open_spectral_analysis(self):
+        """Delegate to analysis manager."""
+        try:
+            return self.analysis_manager.open_spectral_analysis()
+        except AttributeError:
+            messagebox.showinfo("Feature Not Available", "Spectral analysis is not currently implemented.")
+    
+    def open_black_ink_extractor(self):
+        """Delegate to analysis manager."""
+        try:
+            return self.analysis_manager.open_black_ink_extractor()
+        except AttributeError:
+            messagebox.showinfo("Feature Not Available", "Black ink extractor is not currently implemented.")
+    
+    def open_database_viewer(self):
+        """Delegate to analysis manager."""
+        try:
+            return self.analysis_manager.open_database_viewer()
+        except AttributeError:
+            messagebox.showinfo("Feature Not Available", "Database viewer is not currently implemented.")
+    
+    def measure_perforations(self):
+        """Delegate to analysis manager."""
+        try:
+            return self.analysis_manager.measure_perforations()
+        except AttributeError:
+            messagebox.showinfo("Feature Not Available", "Perforation measurement is not currently implemented.")
+    
+    def open_precision_measurements(self):
+        """Delegate to analysis manager."""
+        try:
+            return self.analysis_manager.open_precision_measurements()
+        except AttributeError:
+            messagebox.showinfo("Feature Not Available", "Precision measurements are not currently implemented.")
+    
+    def show_about(self):
+        """Show about dialog."""
+        messagebox.showinfo(
+            "About StampZ-III",
+            "StampZ-III\n\nPhilatelic Image Analysis Tool\n\nFeatures:\n• Color Analysis\n• RGB Ternary Plots\n• Plot_3D Integration\n• Perforation Measurement\n\nVersion: Development Build"
+        )
+    
+    def open_preferences(self):
+        """Open preferences dialog."""
+        messagebox.showinfo("Preferences", "Preferences dialog not yet implemented.")
+    
+    def reset_view(self):
+        """Reset the canvas view."""
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.reset_view()
+    
+    def fit_to_window(self):
+        """Fit image to window size."""
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.fit_to_window()
+        
+    def open_advanced_color_visualization(self):
+        """Open RGB ternary analysis dialog with optional Plot_3D integration."""
+        try:
+            # Gather available sample sets
+            sample_sets = self._color_bridge.get_available_sample_sets()
+            if not sample_sets:
+                messagebox.showinfo(
+                    "Advanced Color Visualization",
+                    "No color analysis sample sets found.\n\nRun color analysis first to generate databases."
+                )
+                return
+            
+            # Create selection dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Ternary Color Analysis")
+            dialog.geometry("420x420")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            ttk.Label(dialog, text="Select a sample set for RGB ternary analysis:", font=(None, 11, 'bold')).pack(pady=(12,6))
+            
+            listbox = tk.Listbox(dialog, height=8)
+            for s in sample_sets:
+                listbox.insert(tk.END, s)
+            listbox.selection_set(0)
+            listbox.pack(fill=tk.BOTH, expand=True, padx=12)
+            
+            options_frame = ttk.Frame(dialog)
+            options_frame.pack(fill=tk.X, padx=12, pady=8)
+            
+            hull_var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(options_frame, text="Show convex hull on ternary plot", variable=hull_var).pack(anchor='w')
+            
+            plot3d_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(options_frame, text="Also launch Plot_3D for L*a*b* analysis", variable=plot3d_var).pack(anchor='w')
+            
+            ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=(8,8))
+            
+            # Output format options
+            output_frame = ttk.LabelFrame(options_frame, text="Display Options", padding=10)
+            output_frame.pack(fill=tk.X, pady=(5,5))
+            
+            display_var = tk.StringVar(value="interactive")
+            ttk.Radiobutton(output_frame, text="📊 Interactive Window (Plot_3D-style with K-means)", 
+                           variable=display_var, value="interactive").pack(anchor='w')
+            ttk.Radiobutton(output_frame, text="💾 Save Plot as File (PNG in output folder)", 
+                           variable=display_var, value="file").pack(anchor='w')
+            
+            btns = ttk.Frame(dialog)
+            btns.pack(fill=tk.X, padx=12, pady=12)
+            
+            def on_cancel():
+                dialog.destroy()
+            
+            def on_run():
+                selection = listbox.curselection()
+                if not selection:
+                    messagebox.showwarning("Selection Required", "Please select a sample set.")
+                    return
+                selected_set = sample_sets[selection[0]]
+                display_mode = display_var.get()
+                dialog.destroy()
+                self._run_ternary_analysis(
+                    selected_set, 
+                    show_hull=hull_var.get(),
+                    launch_plot3d=plot3d_var.get(),
+                    display_mode=display_mode
+                )
+            
+            ttk.Button(btns, text="Cancel", command=on_cancel).pack(side=tk.RIGHT)
+            ttk.Button(btns, text="Run", command=on_run).pack(side=tk.RIGHT, padx=(0,8))
+        except Exception as e:
+            logger.exception("Failed to open advanced color visualization dialog")
+            messagebox.showerror("Advanced Color Visualization", f"An error occurred:\n\n{e}")
+    
+    def _run_ternary_analysis(self, sample_set: str, show_hull: bool = True, launch_plot3d: bool = False, display_mode: str = "interactive"):
+        """Run ternary analysis with optional Plot_3D integration."""
+        try:
+            # Load color points
+            color_points = self._color_bridge.load_color_points_from_database(sample_set)
+            if not color_points:
+                messagebox.showwarning("Advanced Color Visualization", "No color points were loaded.")
+                return
+            
+            if display_mode == "interactive":
+                # Open interactive ternary window (Plot_3D style)
+                try:
+                    from gui.ternary_plot_window import TernaryPlotWindow
+                    ternary_window = TernaryPlotWindow(
+                        parent=self.root,
+                        sample_set_name=sample_set,
+                        color_points=color_points
+                    )
+                    # Set hull option
+                    ternary_window.show_hull.set(show_hull)
+                    ternary_window._refresh_plot()
+                    
+                    msg = f"Interactive ternary window opened for '{sample_set}'\n\n📊 {len(color_points)} colors loaded\n🔧 K-means clustering available\n📈 Interactive analysis tools"
+                    if launch_plot3d:
+                        try:
+                            self._launch_plot3d_for_sample_set(sample_set)
+                            msg += "\n🔬 Plot_3D also launched for L*a*b* analysis"
+                        except Exception as e:
+                            logger.warning(f"Plot_3D launch failed: {e}")
+                    
+                    messagebox.showinfo("Interactive Ternary Window", msg)
+                    
+                except Exception as e:
+                    logger.exception("Failed to open interactive window")
+                    messagebox.showerror("Window Error", f"Failed to open interactive window: {e}")
+                    
+            else:  # file mode
+                # Create and save ternary plot file
+                out_dir = os.path.join(os.getcwd(), 'output')
+                os.makedirs(out_dir, exist_ok=True)
+                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                ternary_path = os.path.join(out_dir, f"ternary_plot_{sample_set}_{timestamp}.png")
+                
+                fig2d = self._ternary_plotter.create_ternary_plot(
+                    color_points,
+                    title=f"RGB Ternary Analysis - {sample_set} ({len(color_points)} colors)",
+                    color_by="auto",
+                    show_hull=show_hull
+                )
+                self._ternary_plotter.save_plot(fig2d, ternary_path)
+                
+                # Launch Plot_3D if requested
+                plot3d_launched = False
+                if launch_plot3d:
+                    try:
+                        self._launch_plot3d_for_sample_set(sample_set)
+                        plot3d_launched = True
+                    except Exception as e:
+                        logger.warning(f"Plot_3D launch failed: {e}")
+                
+                # Show completion message
+                msg = (
+                    f"Ternary analysis completed for '{sample_set}'\\n\\n"
+                    f"📊 RGB Ternary Plot: {os.path.basename(ternary_path)}\\n"
+                    f"📈 Colors analyzed: {len(color_points)}\\n"
+                )
+                
+                if plot3d_launched:
+                    msg += f"🔬 Plot_3D launched for L*a*b* analysis\\n"
+                
+                if messagebox.askyesno("Ternary Analysis Complete", msg + "\\nOpen output folder now?"):
+                    webbrowser.open(f"file://{out_dir}")
+        except Exception as e:
+            logger.exception("Failed during ternary analysis run")
+            messagebox.showerror("Ternary Analysis", f"An error occurred during analysis:\n\n{e}")
+    
+    def _launch_plot3d_for_sample_set(self, sample_set: str):
+        """Launch Plot_3D with the existing database for the sample set."""
+        try:
+            # Use existing Plot_3D integration to open the sample set
+            from plot3d.standalone_plot3d import main as plot3d_main
+            import threading
+            
+            # Get the database file path
+            from utils.path_utils import get_color_analysis_dir
+            analysis_dir = get_color_analysis_dir()
+            db_path = os.path.join(analysis_dir, f"{sample_set}.db")
+            
+            if not os.path.exists(db_path):
+                raise Exception(f"Database not found: {db_path}")
+            
+            # Launch Plot_3D in a separate thread
+            def launch_plot3d():
+                try:
+                    # Let Plot_3D handle the database directly
+                    plot3d_main()
+                except Exception as e:
+                    logger.warning(f"Plot_3D launch error: {e}")
+            
+            thread = threading.Thread(target=launch_plot3d, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            raise Exception(f"Failed to launch Plot_3D: {e}")
+    
+    def _export_to_plot3d(self, color_points, sample_set: str):
         """Delegate to analysis manager."""
         return self.analysis_manager.open_spectral_analysis()
         

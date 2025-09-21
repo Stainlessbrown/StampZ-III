@@ -135,6 +135,13 @@ class MenuManager:
             command=self.app.export_with_library_matches
         )
         
+        self.color_menu.add_separator()
+        
+        self.color_menu.add_command(
+            label="RGB Ternary Analysis...",
+            command=self.app.open_advanced_color_visualization
+        )
+        
     def _create_measurement_menu(self):
         """Create the Measurement menu."""
         self.measurement_menu = tk.Menu(self.menubar, tearoff=0)
