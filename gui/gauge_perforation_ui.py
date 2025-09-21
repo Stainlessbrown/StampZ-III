@@ -383,31 +383,41 @@ class GaugePerforationDialog:
             return
         
         try:
-            # Create gauge overlay for the full-size image
+            # Create gauge overlay accounting for display scaling
             img_width, img_height = self.base_image.size
-            overlay = self.gauge_system.create_gauge_overlay(img_width, img_height)
+            
+            # Calculate display-scaled dimensions and DPI
+            display_width = int(img_width * self.scale_factor)
+            display_height = int(img_height * self.scale_factor)
+            display_dpi = int(self.gauge_system.dpi * self.scale_factor)
+            
+            # Create gauge system at display-scaled DPI
+            display_gauge_system = FinalPerforationGauge(dpi=display_dpi)
+            overlay = display_gauge_system.create_gauge_overlay(display_width, display_height)
             
             # Rotate if vertical orientation
             if self.orientation_var.get() == 'vertical':
-                overlay = self.gauge_system.rotate_90(overlay)
+                overlay = display_gauge_system.rotate_90(overlay)
             
             # Convert overlay to PIL Image
             overlay_pil = Image.fromarray(overlay, 'RGBA')
             
-            # Composite overlay with base image
-            composite = Image.new('RGBA', self.base_image.size)
-            composite.paste(self.base_image.convert('RGBA'), (0, 0))
+            # Create display-sized composite
+            composite = Image.new('RGBA', (display_width, display_height))
             
-            # Position overlay (start centered)
-            overlay_x = (img_width - overlay_pil.width) // 2
-            overlay_y = (img_height - overlay_pil.height) // 2
-            self.overlay_position = (overlay_x, overlay_y)
+            # Scale base image to display size
+            scaled_base = self.base_image.resize((display_width, display_height), Image.LANCZOS)
+            composite.paste(scaled_base.convert('RGBA'), (0, 0))
+            
+            # Position overlay (start centered) - now in display coordinates
+            overlay_x = (display_width - overlay_pil.width) // 2
+            overlay_y = (display_height - overlay_pil.height) // 2
+            self.overlay_position = (overlay_x, overlay_y)  # Store in display coordinates
             
             composite.paste(overlay_pil, self.overlay_position, overlay_pil)
             
-            # Scale for display using CURRENT scale factor (preserve user's sizing)
-            display_size = (int(img_width * self.scale_factor), int(img_height * self.scale_factor))
-            self.display_image = composite.resize(display_size, Image.LANCZOS)
+            # Use composite directly as display image (already at correct scale)
+            self.display_image = composite
             
             self.current_gauge_overlay = overlay_pil
             self._update_canvas_display()

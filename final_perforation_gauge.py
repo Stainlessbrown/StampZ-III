@@ -46,7 +46,7 @@ class FinalPerforationGauge:
         
         # Calculate measurement area
         measurement_pixels = int(25 * self.pixels_per_mm)  # 25mm standard
-        end_x = min(start_x + measurement_pixels, width - int(60 * scale))
+        end_x = start_x + measurement_pixels
         
         dot_positions = {}
         
