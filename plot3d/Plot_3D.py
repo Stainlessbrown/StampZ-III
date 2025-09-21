@@ -154,8 +154,8 @@ class Plot3DApp:
         if self.file_path:
             print(f"Selected file: {self.file_path}")
 
-        # Single attempt to open file (only if using file-based mode)
-        if self.file_path:
+        # Single attempt to open file (only if using file-based mode and not using DataFrame)
+        if self.file_path and dataframe is None:
             try:
                 print(f"Opening selected file: {self.file_path}")
                 if not self._open_file_immediate(self.file_path):
@@ -163,7 +163,10 @@ class Plot3DApp:
             except Exception as e:
                 print(f"Warning: Failed to open file: {str(e)}")
         else:
-            print("Using DataFrame mode - no file to open")
+            if dataframe is not None:
+                print("Using DataFrame mode - no external file to open")
+            else:
+                print("No file path available - skipping file opening")
     
         # Create main window - either standalone or as child window
         if parent is None:
@@ -1675,8 +1678,8 @@ class Plot3DApp:
                     # First try with soffice command (LibreOffice binary)
                     process = subprocess.Popen(
                         ['soffice', file_path],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         start_new_session=True
                     )
                     print("Successfully launched LibreOffice using soffice command")
@@ -1688,8 +1691,8 @@ class Plot3DApp:
                         # Try direct path to LibreOffice
                         process = subprocess.Popen(
                             ['/Applications/LibreOffice.app/Contents/MacOS/soffice', file_path],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
                             start_new_session=True
                         )
                         print("Successfully launched LibreOffice using direct path")
@@ -1701,8 +1704,8 @@ class Plot3DApp:
                         try:
                             subprocess.Popen(
                                 ['open', file_path],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
                                 start_new_session=True
                             )
                             print("Successfully launched with default handler")
@@ -1716,8 +1719,8 @@ class Plot3DApp:
                     # Try LibreOffice on Windows
                     subprocess.Popen(
                         ['soffice', file_path],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         start_new_session=True
                     )
                     print("Successfully launched LibreOffice on Windows")
@@ -1736,8 +1739,8 @@ class Plot3DApp:
                     try:
                         subprocess.Popen(
                             [cmd, file_path],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
                             start_new_session=True
                         )
                         print(f"Successfully launched with {cmd}")
