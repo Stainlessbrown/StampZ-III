@@ -852,11 +852,11 @@ class GaugePerforationDialog:
             'horizontal_gauge': self.horizontal_measurement if self.horizontal_measurement is not None else "Not measured",
             'vertical_gauge': self.vertical_measurement if self.vertical_measurement is not None else "Not measured",
             'dpi_used': self.dpi_var.get(),
-            'color_scheme': self.color_var.get(),
+            'color_scheme': 'Traditional white/black',
             'measurement_method': 'Visual gauge reading with traditional overlay',
             'measurement_tool': 'StampZ Gauge Perforation System',
             'regularity': 'Visual assessment with gauge overlay',
-            'notes': f"Measured using traditional gauge overlay at {self.dpi_var.get()} DPI with {self.color_var.get()} color scheme"
+            'notes': f"Measured using traditional gauge overlay at {self.dpi_var.get()} DPI with traditional white/black color scheme"
         }
         
         return perf_data
@@ -924,7 +924,7 @@ class GaugePerforationDialog:
         lines.append("MEASUREMENT DETAILS")
         lines.append("-" * 20)
         lines.append(f"DPI Used: {self.dpi_var.get()}")
-        lines.append(f"Color Scheme: {self.color_var.get()}")
+        lines.append(f"Color Scheme: Traditional white/black")
         lines.append("Measurement Method: Visual gauge reading")
         
         # Write to file
