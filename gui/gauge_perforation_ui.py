@@ -588,15 +588,23 @@ class GaugePerforationDialog:
             return
         
         try:
-            # Create composite image
+            # Use same display-scaled approach as _show_gauge
             img_width, img_height = self.base_image.size
-            composite = Image.new('RGBA', self.base_image.size)
-            composite.paste(self.base_image.convert('RGBA'), (0, 0))
+            display_width = int(img_width * self.scale_factor)
+            display_height = int(img_height * self.scale_factor)
+            
+            # Create display-sized composite
+            composite = Image.new('RGBA', (display_width, display_height))
+            
+            # Scale base image to display size
+            scaled_base = self.base_image.resize((display_width, display_height), Image.LANCZOS)
+            composite.paste(scaled_base.convert('RGBA'), (0, 0))
+            
+            # Paste overlay at current position (already in display coordinates)
             composite.paste(self.current_gauge_overlay, self.overlay_position, self.current_gauge_overlay)
             
-            # Scale for display using CURRENT scale factor (preserve user's sizing)
-            display_size = (int(img_width * self.scale_factor), int(img_height * self.scale_factor))
-            self.display_image = composite.resize(display_size, Image.LANCZOS)
+            # Use composite directly (no additional scaling)
+            self.display_image = composite
             
             self._update_canvas_display()
             
