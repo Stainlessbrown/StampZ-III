@@ -31,7 +31,7 @@ class LaunchSelector:
         """Configure the launch selector window."""
         # Set window size and make it non-resizable for clean appearance
         window_width = 600
-        window_height = 650  # Further increased height to show both buttons
+        window_height = 800  # Further increased height to show all three options
         self.root.geometry(f"{window_width}x{window_height}")
         self.root.resizable(False, False)
         
@@ -102,7 +102,33 @@ class LaunchSelector:
         )
         full_button.pack(anchor='w')
         
-        # Option 2: Plot_3D Only
+        # Option 2: Ternary Analysis
+        ternary_frame = ttk.LabelFrame(options_frame, text="RGB Ternary Plot Analysis", padding=12)
+        ternary_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(
+            ternary_frame,
+            text="🎨 Ternary Plot Viewer",
+            font=("Arial", 16, "bold")
+        ).pack(anchor='w')
+        
+        ttk.Label(
+            ternary_frame,
+            text="• Visualize existing color databases\n"
+                 "• Interactive RGB ternary plots with K-means\n"
+                 "• Marker/color customization and sync",
+            font=("Arial", 11),
+            foreground="gray"
+        ).pack(anchor='w', pady=(8, 12))
+        
+        ternary_button = ttk.Button(
+            ternary_frame,
+            text="Open Ternary Plot Viewer",
+            command=self._launch_ternary_viewer
+        )
+        ternary_button.pack(anchor='w')
+        
+        # Option 3: Plot_3D Only
         plot3d_frame = ttk.LabelFrame(options_frame, text="Advanced 3D Analysis", padding=12)
         plot3d_frame.pack(fill=tk.X)
         
@@ -145,6 +171,11 @@ class LaunchSelector:
     def _launch_full_app(self):
         """Launch the full StampZ-III application."""
         self.selected_mode = "full"
+        self.root.quit()  # Stop the mainloop
+        
+    def _launch_ternary_viewer(self):
+        """Launch Ternary Plot Viewer."""
+        self.selected_mode = "ternary"
         self.root.quit()  # Stop the mainloop
         
     def _launch_plot3d_only(self):

@@ -14,7 +14,7 @@ but focused on RGB ternary relationships.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import numpy as np
@@ -26,8 +26,11 @@ import os
 # StampZ imports
 from utils.color_data_bridge import ColorDataBridge
 from utils.advanced_color_plots import TernaryPlotter, ColorPoint
+from gui.ternary_clustering import TernaryClusterManager
+from gui.ternary_datasheet import TernaryDatasheetManager
+from gui.ternary_export import TernaryExportManager
 
-# Optional ML imports
+# Optional ML imports for backward compatibility
 try:
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
@@ -56,7 +59,7 @@ class TernaryPlotWindow:
         'x': 40,  # Cross (increased for better visibility)
     }
     
-    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None, app_ref=None):
+    def __init__(self, parent=None, sample_set_name="StampZ_Analysis", color_points=None, datasheet_ref=None, app_ref=None, db_format=None):
         """Initialize ternary plot window.
         
         Args:
@@ -65,15 +68,41 @@ class TernaryPlotWindow:
             color_points: Optional pre-loaded color points
             datasheet_ref: Optional reference to associated realtime datasheet
             app_ref: Optional reference to main application for integration features
+            db_format: Optional detected database format ('ACTUAL_LAB', 'NORMALIZED', 'MIXED', 'UNKNOWN')
         """
         self.parent = parent
         self.sample_set_name = sample_set_name
         self.color_points = color_points or []
+        self.db_format = db_format or 'UNKNOWN'
+        
+        # Initialize clustering manager
+        self.cluster_manager = TernaryClusterManager()
+        
+        # Initialize datasheet manager
+        self.datasheet_manager = TernaryDatasheetManager(ternary_window_ref=self)
+        
+        # Initialize export manager
+        self.export_manager = TernaryExportManager(ternary_window_ref=self)
+        
+        # Keep legacy references for backward compatibility
         self.clusters = {}
-        self.cluster_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan']
+        self.cluster_colors = self.cluster_manager.cluster_colors
+        
         self.show_hull = tk.BooleanVar(value=True)
-        self.show_clusters = tk.BooleanVar(value=False)
+        self.show_clusters = tk.BooleanVar(value=False) 
         self.n_clusters = tk.IntVar(value=3)
+        
+        # Add variable tracing to detect checkbox changes with simple test functions
+        def hull_trace_callback(*args):
+            print(f"🔧 TRACE: Hull variable changed to {self.show_hull.get()}")
+            self._on_hull_toggle()
+            
+        def clusters_trace_callback(*args):
+            print(f"🔧 TRACE: Clusters variable changed to {self.show_clusters.get()}")
+            self._on_clusters_toggle()
+            
+        self.show_hull.trace_add('write', hull_trace_callback)
+        self.show_clusters.trace_add('write', clusters_trace_callback)
         
         # Track external file for integration
         self.external_file_path = None
@@ -98,11 +127,27 @@ class TernaryPlotWindow:
             logger.info("Setting up UI...")
             self._setup_ui()
             
+            # Update format indicator if we have format info
+            if self.db_format != 'UNKNOWN':
+                logger.info(f"Setting format indicator to: {self.db_format}")
+                self._update_format_indicator(self.db_format)
+            
             logger.info("Loading initial data...")
             self._load_initial_data()
             
             logger.info("Creating initial plot...")
             self._create_initial_plot()
+            
+            # Ensure window is visible on macOS
+            import platform
+            if platform.system() == 'Darwin':
+                self.window.update()
+                self.window.deiconify()  # Ensure it's not minimized
+                self.window.lift()
+            
+            # If this is an orphaned window (no parent), just ensure it's visible
+            if not self.parent:
+                logger.info("Orphaned window detected - ensuring visibility")
             
             logger.info("TernaryPlotWindow initialization complete")
             
@@ -128,6 +173,14 @@ class TernaryPlotWindow:
         self.window.title(f"RGB Ternary Analysis - {self.sample_set_name}")
         self.window.geometry("1200x800")
         
+        # macOS-specific window handling
+        import platform
+        if platform.system() == 'Darwin':  # macOS
+            # Ensure window is visible and comes to front
+            self.window.lift()
+            self.window.attributes('-topmost', True)
+            self.window.after(100, lambda: self.window.attributes('-topmost', False))
+        
         # Center window
         self.window.update_idletasks()
         x = (self.window.winfo_screenwidth() // 2) - (self.window.winfo_width() // 2)
@@ -142,6 +195,18 @@ class TernaryPlotWindow:
             self.window.transient(self.parent)
         
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        
+        # macOS: Force window to appear
+        if platform.system() == 'Darwin':
+            self.window.focus_force()
+    
+    def _start_orphaned_mainloop(self):
+        """Start the mainloop for orphaned windows."""
+        try:
+            logger.info("Starting orphaned window mainloop...")
+            self.window.mainloop()
+        except Exception as e:
+            logger.exception(f"Error in orphaned mainloop: {e}")
     
     def _setup_ui(self):
         """Setup the user interface with Plot_3D-style layout."""
@@ -175,8 +240,9 @@ class TernaryPlotWindow:
         # Pack canvas AFTER toolbar so toolbar appears above
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Add click handler for point selection
+        # Add click handler for point selection and identification
         self.selected_points = set()
+        self.point_labels = []  # Store active point labels for cleanup
         self.canvas.mpl_connect('button_press_event', self._on_plot_click)
         
         # Status bar
@@ -184,61 +250,134 @@ class TernaryPlotWindow:
         self.status_bar.pack(fill=tk.X, pady=(2, 0))
     
     def _create_toolbar(self, parent):
-        """Create toolbar similar to Plot_3D."""
+        """Create toolbar with 2 rows for better space management."""
         self.toolbar = ttk.Frame(parent)
         self.toolbar.pack(fill=tk.X, pady=(0, 5))
         
-        # Left side - Data controls
-        left_frame = ttk.Frame(self.toolbar)
+        # === TOP ROW: Data Controls ===
+        top_row = ttk.Frame(self.toolbar)
+        top_row.pack(fill=tk.X, pady=(0, 2))
+        
+        # Left side - Sample info and data controls
+        left_frame = ttk.Frame(top_row)
         left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         ttk.Label(left_frame, text="Sample Set:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(left_frame, text=self.sample_set_name, font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(left_frame, text=self.sample_set_name, font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Database Format Indicator
+        self.format_frame = ttk.Frame(left_frame)
+        self.format_frame.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(self.format_frame, text="Format:", font=('Arial', 9)).pack(side=tk.LEFT, padx=(0, 2))
+        self.format_indicator = ttk.Label(self.format_frame, text="UNKNOWN", font=('Arial', 9, 'bold'), 
+                                        foreground='gray', background='lightgray', relief='sunken', width=12)
+        self.format_indicator.pack(side=tk.LEFT)
         
         ttk.Button(left_frame, text="Load Database", command=self._load_data_dialog).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(left_frame, text="Load External File", command=self._load_external_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(left_frame, text="↻ Reload Database", command=self._reload_current_database).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(left_frame, text="Refresh Plot", command=self._refresh_plot_only).pack(side=tk.LEFT, padx=(0, 5))
         
         # Datasheet sync button (initially hidden)
         self.refresh_from_datasheet_btn = ttk.Button(left_frame, text="↻ Sync from Datasheet", command=self._refresh_from_datasheet)
-        # Don't pack initially - will be shown when datasheet is opened
+        # Pack it but make it initially disabled until datasheet is opened
+        self.refresh_from_datasheet_btn.pack(side=tk.LEFT, padx=(5, 15))
+        self.refresh_from_datasheet_btn.config(state='disabled')
         
-        # Middle - Visualization options
-        middle_frame = ttk.Frame(self.toolbar)
-        middle_frame.pack(side=tk.LEFT)
+        # Right side - Save/Export controls
+        right_frame_top = ttk.Frame(top_row)
+        right_frame_top.pack(side=tk.RIGHT)
         
-        ttk.Checkbutton(middle_frame, text="Convex Hull", variable=self.show_hull, 
-                       command=self._refresh_plot).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(right_frame_top, text="💾 Save As Database", command=self._save_as_database).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(right_frame_top, text="📊 Open Datasheet", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(right_frame_top, text="🔬 Spectral Analysis", command=self._open_spectral_analyzer).pack(side=tk.LEFT, padx=(0, 5))
         
-        ttk.Checkbutton(middle_frame, text="K-means Clusters", variable=self.show_clusters,
-                       command=self._toggle_clusters).pack(side=tk.LEFT, padx=(0, 5))
+        # === BOTTOM ROW: Visualization Controls ===
+        bottom_row = ttk.Frame(self.toolbar)
+        bottom_row.pack(fill=tk.X)
         
-        ttk.Label(middle_frame, text="Clusters:").pack(side=tk.LEFT, padx=(0, 2))
-        cluster_spin = ttk.Spinbox(middle_frame, from_=2, to=8, width=3, textvariable=self.n_clusters,
+        # Left side - Visualization options
+        viz_frame = ttk.Frame(bottom_row)
+        viz_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Convex Hull checkbox with manual click detection
+        hull_cb = ttk.Checkbutton(viz_frame, text="Convex Hull", variable=self.show_hull)
+        hull_cb.pack(side=tk.LEFT, padx=(0, 10))
+        hull_cb.bind('<ButtonRelease-1>', lambda e: self._manual_hull_toggle())
+        hull_cb.bind('<Return>', lambda e: self._manual_hull_toggle())
+        hull_cb.bind('<space>', lambda e: self._manual_hull_toggle())
+        
+        # K-means Clusters checkbox with manual click detection
+        clusters_cb = ttk.Checkbutton(viz_frame, text="K-means Clusters", variable=self.show_clusters)
+        clusters_cb.pack(side=tk.LEFT, padx=(0, 5))
+        clusters_cb.bind('<ButtonRelease-1>', lambda e: self._manual_clusters_toggle())
+        clusters_cb.bind('<Return>', lambda e: self._manual_clusters_toggle())
+        clusters_cb.bind('<space>', lambda e: self._manual_clusters_toggle())
+        
+        ttk.Label(viz_frame, text="Clusters:").pack(side=tk.LEFT, padx=(0, 2))
+        cluster_spin = ttk.Spinbox(viz_frame, from_=2, to=8, width=3, textvariable=self.n_clusters,
                                   command=self._update_clusters)
         cluster_spin.pack(side=tk.LEFT, padx=(0, 5))
         
-        # Add sphere visualization option
+        # Store reference for additional event binding
+        self.cluster_spin = cluster_spin
+        
+        # Ensure the spinbox shows the initial value
+        cluster_spin.set(self.n_clusters.get())
+        
+        # Add additional event bindings for better cross-platform compatibility
+        cluster_spin.bind('<KeyRelease>', lambda e: self._on_spinbox_change())
+        cluster_spin.bind('<Button-1>', lambda e: self.window.after(100, self._on_spinbox_change))
+        cluster_spin.bind('<ButtonRelease-1>', lambda e: self.window.after(100, self._on_spinbox_change))
+        self.n_clusters.trace('w', lambda *args: self._on_spinbox_change())
+        
+        # Add sphere visualization option with debugging
         self.show_spheres = tk.BooleanVar()
-        ttk.Checkbutton(middle_frame, text="Spheres", variable=self.show_spheres,
-                       command=self._toggle_spheres).pack(side=tk.LEFT, padx=(5, 15))
+        # Add tracing for spheres variable with test function
+        def spheres_trace_callback(*args):
+            print(f"🔧 TRACE: Spheres variable changed to {self.show_spheres.get()}")
+            self._on_spheres_toggle()
+            
+        self.show_spheres.trace_add('write', spheres_trace_callback)
+        spheres_cb = ttk.Checkbutton(viz_frame, text="Spheres", variable=self.show_spheres)
+        spheres_cb.pack(side=tk.LEFT, padx=(5, 15))
+        spheres_cb.bind('<ButtonRelease-1>', lambda e: self._manual_spheres_toggle())
+        spheres_cb.bind('<Return>', lambda e: self._manual_spheres_toggle())
+        spheres_cb.bind('<space>', lambda e: self._manual_spheres_toggle())
         
-        # Right side - Export controls
-        right_frame = ttk.Frame(self.toolbar)
-        right_frame.pack(side=tk.RIGHT)
+        # Right side - Plot export controls
+        export_frame = ttk.Frame(bottom_row)
+        export_frame.pack(side=tk.RIGHT)
         
-        ttk.Button(right_frame, text="Save Plot", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame, text="Open Datasheet", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame, text="Spectral Analysis", command=self._open_spectral_analyzer).pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Button(export_frame, text="📸 Save Plot PNG", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(export_frame, text="📤 Export Data", command=self._export_data).pack(side=tk.LEFT, padx=(0, 5))
     
     def _load_initial_data(self):
         """Load initial data if color_points not provided."""
         if not self.color_points:
+            # Don't auto-load if launched with placeholder name indicating user selection required
+            if self.sample_set_name == "No Database Selected":
+                logger.info("DEBUG: Ternary window launched without database - user will select manually")
+                self._update_status("Ready - Use 'Load Database' to select a database")
+                self._update_format_indicator('UNKNOWN')
+                return
+                
             try:
-                self.color_points = self.bridge.load_color_points_from_database(self.sample_set_name)
-                self._update_status(f"Loaded {len(self.color_points)} color points")
+                self.color_points, db_format = self.bridge.load_color_points_from_database(self.sample_set_name)
+                logger.info(f"DEBUG: Loaded {len(self.color_points)} color points from {self.sample_set_name} (Format: {db_format})")
+                
+                # Update format indicator
+                self._update_format_indicator(db_format)
+                
+                # Debug: Print first few points to verify loading
+                for i, point in enumerate(self.color_points[:5]):
+                    logger.info(f"DEBUG Point {i}: ID={point.id}, RGB={point.rgb}, Lab={point.lab}")
+                
+                self._update_status(f"Loaded {len(self.color_points)} color points ({db_format} format)")
             except Exception as e:
+                logger.exception(f"Failed to load initial data: {e}")
                 self._update_status(f"No data loaded: {e}")
+                self._update_format_indicator('UNKNOWN')
     
     def _create_initial_plot(self):
         """Create the initial ternary plot."""
@@ -250,7 +389,7 @@ class TernaryPlotWindow:
         Legacy method - maintains original behavior for backward compatibility.
         """
         # This is now just a redirection to the appropriate method based on context
-        if self.datasheet_ref and hasattr(self.datasheet_ref, 'sheet'):
+        if self.datasheet_manager.is_datasheet_linked():
             self._refresh_from_datasheet()
         else:
             self._refresh_plot_only()
@@ -273,8 +412,21 @@ class TernaryPlotWindow:
             self._draw_ternary_framework()
             self._plot_data_points()
             
-            if self.show_clusters.get() and HAS_SKLEARN:
-                self._plot_clusters()
+            # Plot clusters if enabled and available
+            print(f"DEBUG: In _refresh_plot_only - show_clusters: {self.show_clusters.get()}, has_sklearn: {self.cluster_manager.has_sklearn()}")
+            if self.show_clusters.get() and self.cluster_manager.has_sklearn():
+                # Ensure clusters are computed if checkbox is on but no clusters exist
+                if not hasattr(self, 'clusters') or not self.clusters:
+                    print("DEBUG: Clusters enabled but not computed, computing now...")
+                    logger.info("Clusters enabled but not computed, computing now...")
+                    self._compute_clusters()
+                
+                # Plot clusters if they exist
+                if hasattr(self, 'clusters') and self.clusters:
+                    print(f"DEBUG: Plotting {len(self.clusters)} clusters")
+                    self._plot_clusters()
+                else:
+                    print("DEBUG: No clusters to plot after computation attempt")
             
             # Update plot
             self.ax.set_aspect('equal')
@@ -288,18 +440,51 @@ class TernaryPlotWindow:
             self._update_status(f"Plot error: {e}")
     
     def _refresh_from_datasheet(self):
-        """Refresh the plot by syncing data from linked datasheet."""
-        if not self.datasheet_ref or not hasattr(self.datasheet_ref, 'sheet'):
+        """Refresh the plot by syncing data from linked datasheet using datasheet manager."""
+        if not self.datasheet_manager.is_datasheet_linked():
             self._update_status("No datasheet linked for sync")
             return
         
         try:
-            self._sync_from_datasheet()
-            # Now refresh the plot with the synced data
-            self._refresh_plot_only()
-            self._update_status(f"Plot updated from datasheet: {len(self.color_points)} points")
+            logger.info("🔄 REFRESH DEBUG: Starting datasheet sync from ternary plot window")
+            self._update_status("Syncing from datasheet...")
+            
+            # Use datasheet manager to sync data
+            updated_color_points = self.datasheet_manager.sync_from_datasheet()
+            
+            if updated_color_points:
+                logger.info(f"🔄 REFRESH DEBUG: Received {len(updated_color_points)} updated points from datasheet")
+                
+                # Debug: Show first few updated points with their metadata
+                for i, point in enumerate(updated_color_points[:3]):
+                    if hasattr(point, 'metadata'):
+                        logger.info(f"🔄 REFRESH DEBUG: Point {i} ({point.id}): marker={point.metadata.get('marker', 'N/A')}, color={point.metadata.get('marker_color', 'N/A')}")
+                
+                # Update the color points
+                self.color_points = updated_color_points
+                
+                # Force a complete plot refresh to show updated markers/colors
+                self._refresh_plot_only()
+                
+                # Update status with success message
+                points_with_prefs = sum(1 for p in self.color_points 
+                                      if hasattr(p, 'metadata') and 
+                                         (p.metadata.get('marker', '.') != '.' or 
+                                          p.metadata.get('marker_color', 'blue') != 'blue'))
+                
+                self._update_status(f"Synced {len(self.color_points)} points ({points_with_prefs} with custom preferences)")
+                logger.info("🔄 REFRESH DEBUG: Plot refresh completed with synced data")
+                
+                # Flash the window to indicate sync completed
+                if hasattr(self, 'window'):
+                    self.window.bell()  # Audio feedback
+                
+            else:
+                logger.warning("🔄 REFRESH DEBUG: No data synced from datasheet")
+                self._update_status("No data synced from datasheet")
+                
         except Exception as e:
-            logger.exception("Failed to sync from datasheet")
+            logger.exception(f"🔄 REFRESH DEBUG: Failed to sync from datasheet: {e}")
             self._update_status(f"Datasheet sync error: {e}")
             # Fall back to regular refresh
             self._refresh_plot_only()
@@ -402,7 +587,10 @@ class TernaryPlotWindow:
     def _plot_data_points(self):
         """Plot the color data points with proper marker types and highlighting."""
         if not self.color_points:
+            logger.warning("DEBUG: No color_points available for plotting")
             return
+        
+        logger.info(f"DEBUG: Starting to plot {len(self.color_points)} color points")
         
         # Color map for named colors from datasheet
         color_map = {
@@ -419,10 +607,15 @@ class TernaryPlotWindow:
         # Group points by marker type for efficient plotting
         marker_groups = {}
         
+        plotted_count = 0
         for i, point in enumerate(self.color_points):
+            logger.debug(f"DEBUG: Processing point {i}: ID={point.id}, RGB={point.rgb}")
+            
             # Ensure ternary coordinates are computed
             if not hasattr(point, 'ternary_coords') or point.ternary_coords is None:
                 point.ternary_coords = self.ternary_plotter.rgb_to_ternary(point.rgb)
+            
+            logger.debug(f"DEBUG: Point {i} ternary coords: {point.ternary_coords}")
             
             # Get marker style from metadata
             marker_style = 'o'  # default
@@ -436,6 +629,9 @@ class TernaryPlotWindow:
             else:
                 # Use RGB color of the point
                 point_color = tuple(c/255.0 for c in point.rgb)
+            
+            logger.debug(f"DEBUG: Point {i} - marker:{marker_style}, color:{point_color}")
+            plotted_count += 1
             
             # Get marker-specific base size from dictionary (like Plot_3D)
             base_size = self.MARKER_SIZES.get(marker_style, 25)
@@ -465,6 +661,10 @@ class TernaryPlotWindow:
             marker_groups[marker_style]['linewidths'].append(linewidth)
             marker_groups[marker_style]['indices'].append(i)
         
+        logger.info(f"DEBUG: Processed {plotted_count} points, created {len(marker_groups)} marker groups")
+        for marker_style, group_data in marker_groups.items():
+            logger.info(f"DEBUG: Marker group '{marker_style}' has {len(group_data['x'])} points")
+        
         # Plot each marker type separately
         self.plotted_points = {}  # Store for click detection
         
@@ -472,7 +672,9 @@ class TernaryPlotWindow:
         if self.show_spheres.get():
             self._plot_spheres()
         
+        total_plotted_points = 0
         for marker_style, group_data in marker_groups.items():
+            logger.info(f"DEBUG: Plotting {len(group_data['x'])} points for marker '{marker_style}'")
             scatter = self.ax.scatter(
                 group_data['x'], group_data['y'], 
                 c=group_data['colors'], 
@@ -485,6 +687,9 @@ class TernaryPlotWindow:
                 picker=True  # Enable picking for click detection
             )
             
+            total_plotted_points += len(group_data['x'])
+            logger.info(f"DEBUG: Scatter plot created for marker '{marker_style}' with {len(group_data['x'])} points")
+            
             # Store mapping for click detection
             for i, point_idx in enumerate(group_data['indices']):
                 self.plotted_points[point_idx] = {
@@ -492,6 +697,46 @@ class TernaryPlotWindow:
                     'y': group_data['y'][i], 
                     'scatter': scatter
                 }
+        
+        logger.info(f"DEBUG: TOTAL PLOTTED POINTS: {total_plotted_points} out of {len(self.color_points)} available")
+        
+        # Debug: Check for overlapping coordinates and apply jitter if needed
+        coordinates = [(point.ternary_coords[0], point.ternary_coords[1]) for point in self.color_points]
+        unique_coordinates = set(coordinates)
+        if len(unique_coordinates) != len(coordinates):
+            logger.warning(f"DEBUG: Found overlapping coordinates! {len(coordinates)} points but only {len(unique_coordinates)} unique positions")
+            # Find duplicates
+            from collections import Counter
+            coord_counts = Counter(coordinates)
+            duplicates = {coord: count for coord, count in coord_counts.items() if count > 1}
+            logger.warning(f"DEBUG: Duplicate coordinates: {duplicates}")
+            
+            # Apply small random jitter to overlapping points to make them visible
+            logger.info("DEBUG: Applying jitter to overlapping points for visibility...")
+            import random
+            random.seed(42)  # Consistent jitter across runs
+            
+            coord_seen = {}
+            jittered_count = 0
+            for point in self.color_points:
+                coord_key = (round(point.ternary_coords[0], 6), round(point.ternary_coords[1], 6))
+                if coord_key in coord_seen:
+                    # Add small random offset (0.015 = 1.5% of plot area)
+                    jitter_x = random.uniform(-0.015, 0.015)
+                    jitter_y = random.uniform(-0.015, 0.015)
+                    new_x = max(0.0, min(1.0, point.ternary_coords[0] + jitter_x))
+                    new_y = max(0.0, min(1.0, point.ternary_coords[1] + jitter_y))
+                    point.ternary_coords = (new_x, new_y, point.ternary_coords[2] if len(point.ternary_coords) > 2 else 0)
+                    coord_seen[coord_key] += 1
+                    jittered_count += 1
+                    if jittered_count <= 5:  # Log first 5 for debugging
+                        logger.debug(f"DEBUG: Jittered point {point.id}: {coord_key} -> ({new_x:.4f}, {new_y:.4f})")
+                else:
+                    coord_seen[coord_key] = 1
+                    
+            logger.info(f"DEBUG: Applied jitter to {jittered_count} overlapping points")
+        else:
+            logger.info(f"DEBUG: All {len(coordinates)} points have unique coordinates")
         
         # Add point labels for small datasets
         if len(self.color_points) <= 15:
@@ -507,32 +752,81 @@ class TernaryPlotWindow:
         
         # Add convex hull if requested
         if self.show_hull.get() and len(self.color_points) >= 3:
+            print(f"DEBUG: Attempting to draw convex hull for {len(self.color_points)} points")
             x_coords = [p.ternary_coords[0] for p in self.color_points]
             y_coords = [p.ternary_coords[1] for p in self.color_points]
             self._add_convex_hull(x_coords, y_coords)
+        else:
+            print(f"DEBUG: Convex hull not drawn - show_hull: {self.show_hull.get()}, points: {len(self.color_points) if self.color_points else 0}")
     
     def _add_convex_hull(self, x_coords, y_coords):
         """Add convex hull to the plot."""
         try:
+            print(f"DEBUG: _add_convex_hull called with {len(x_coords)} coordinates")
             from scipy.spatial import ConvexHull
             points = np.column_stack((x_coords, y_coords))
+            print(f"DEBUG: Created points array with shape: {points.shape}")
             hull = ConvexHull(points)
+            print(f"DEBUG: ConvexHull computed with {len(hull.vertices)} vertices")
             
-            # Plot hull
+            # Plot hull with high visibility
+            hull_lines_added = 0
             for simplex in hull.simplices:
-                self.ax.plot(points[simplex, 0], points[simplex, 1], 'k-', alpha=0.4, linewidth=1)
+                # Make hull lines much more visible
+                self.ax.plot(points[simplex, 0], points[simplex, 1], 
+                           'red', alpha=0.8, linewidth=3, linestyle='--', zorder=10)
+                hull_lines_added += 1
+            print(f"DEBUG: Added {hull_lines_added} hull edge lines")
             
-            # Fill hull area
+            # Fill hull area with more visible color
             hull_points = points[hull.vertices]
-            self.ax.fill(hull_points[:, 0], hull_points[:, 1], alpha=0.1, color='gray')
+            self.ax.fill(hull_points[:, 0], hull_points[:, 1], 
+                        alpha=0.2, color='yellow', zorder=1)
+            print(f"DEBUG: Added hull fill area")
             
-        except ImportError:
-            pass  # Skip if scipy not available
+            # Force canvas refresh to make sure changes are visible
+            if hasattr(self, 'canvas'):
+                self.canvas.draw_idle()
+                print(f"DEBUG: Forced canvas refresh")
+            
+        except ImportError as e:
+            print(f"DEBUG: scipy not available for convex hull: {e}")
         except Exception as e:
+            print(f"DEBUG: Convex hull failed with error: {e}")
             logger.warning(f"Convex hull failed: {e}")
     
     def _plot_spheres(self):
-        """Plot sphere-style cluster visualization as background elements."""
+        """Plot sphere-style cluster visualization using cluster manager."""
+        if not self.clusters:
+            return
+        
+        # Use cluster manager to create sphere patches
+        try:
+            patches = self.cluster_manager.create_sphere_patches()
+            
+            for circle, color, label in patches:
+                self.ax.add_patch(circle)
+            
+            # Create centroid markers
+            markers = self.cluster_manager.create_centroid_markers()
+            
+            for marker in markers:
+                self.ax.scatter(marker['x'], marker['y'], 
+                              c=[marker['color']], s=marker['size'], 
+                              marker=marker['marker'], 
+                              edgecolors='black', linewidths=1, 
+                              zorder=2, alpha=0.7, 
+                              label=marker['label'])
+        
+        except Exception as e:
+            logger.warning(f"Failed to plot spheres using cluster manager: {e}")
+            # Fallback to legacy method
+            self._plot_spheres_legacy()
+        
+        # Legend will be added by the main _plot_clusters method to avoid duplicates
+    
+    def _plot_spheres_legacy(self):
+        """Legacy sphere plotting method as fallback."""
         if not self.clusters:
             return
         
@@ -562,69 +856,109 @@ class TernaryPlotWindow:
                           edgecolors='black', linewidths=1, 
                           zorder=2, alpha=0.7, 
                           label=f'Cluster {label} ({len(points)} pts)')
-        
-        # Legend will be added by the main _plot_clusters method to avoid duplicates
     
     def _toggle_clusters(self):
         """Toggle K-means cluster display."""
+        print(f"DEBUG: _toggle_clusters called, checkbox state: {self.show_clusters.get()}")
+        print(f"DEBUG: Available color points: {len(self.color_points) if self.color_points else 0}")
+        
         if self.show_clusters.get():
-            if not HAS_SKLEARN:
+            print("DEBUG: K-means checkbox is ON, checking sklearn...")
+            if not self.cluster_manager.has_sklearn():
+                print("DEBUG: sklearn not available!")
                 messagebox.showwarning("K-means Not Available", 
                                      "Scikit-learn is required for K-means clustering.\n\n"
                                      "Install with: pip install scikit-learn")
                 self.show_clusters.set(False)
                 return
+            print("DEBUG: sklearn available, calling _compute_clusters...")
             self._compute_clusters()
+        else:
+            print("DEBUG: K-means checkbox is OFF, clearing clusters")
+            # Clear clusters when toggled off
+            self.clusters = {}
+            self.cluster_manager.clear_clusters()
+        print("DEBUG: Calling _refresh_plot...")
         self._refresh_plot()
     
     def _compute_clusters(self):
-        """Compute K-means clusters on ternary coordinates."""
-        if not self.color_points or not HAS_SKLEARN:
+        """Compute K-means clusters using the cluster manager."""
+        print(f"DEBUG: _compute_clusters called with {len(self.color_points) if self.color_points else 0} color points")
+        
+        if not self.color_points:
+            print("DEBUG: No color points available for clustering!")
+            self._update_status("No data available for K-means clustering")
+            return
+            
+        if not self.cluster_manager.has_sklearn():
+            print("DEBUG: sklearn not available in _compute_clusters!")
+            self._update_status("Scikit-learn not available for clustering")
             return
         
         try:
-            # Extract ternary coordinates
-            ternary_coords = np.array([point.ternary_coords for point in self.color_points])
-            
-            # Apply K-means
+            # Use cluster manager to compute clusters
             n_clusters = min(self.n_clusters.get(), len(self.color_points) // 2)
+            print(f"DEBUG: Requested {self.n_clusters.get()} clusters, using {n_clusters}")
+            
             if n_clusters < 2:
+                print("DEBUG: Not enough clusters requested or data points")
                 self.clusters = {}
+                self.cluster_manager.clear_clusters()
+                self._update_status(f"Need at least 2 clusters and {n_clusters*2} data points for K-means")
                 return
             
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-            cluster_labels = kmeans.fit_predict(ternary_coords)
+            print(f"DEBUG: Calling cluster_manager.compute_clusters with {len(self.color_points)} points, {n_clusters} clusters")
             
-            # Group points by cluster and save to database
-            self.clusters = {}
-            for i, label in enumerate(cluster_labels):
-                if label not in self.clusters:
-                    self.clusters[label] = []
-                self.clusters[label].append(self.color_points[i])
+            # Compute clusters using the manager
+            clusters = self.cluster_manager.compute_clusters(self.color_points, n_clusters)
+            
+            print(f"DEBUG: cluster_manager returned: {clusters}")
+            print(f"DEBUG: Number of clusters found: {len(clusters) if clusters else 0}")
+            
+            if clusters:
+                # Update legacy reference for backward compatibility
+                self.clusters = clusters
+                print(f"DEBUG: Updated self.clusters with {len(self.clusters)} clusters")
                 
-                # Save cluster assignment to database for persistence
-                self._save_cluster_assignment(self.color_points[i].id, int(label))
-            
-            self._update_status(f"K-means: {len(self.clusters)} clusters computed and saved")
-            
-            # Refresh datasheet if it's open to show cluster assignments
-            if hasattr(self, 'datasheet_ref') and self.datasheet_ref:
-                self._refresh_datasheet_cluster_data()
+                # Save cluster assignments to database
+                for cluster_id, cluster_points in clusters.items():
+                    for point in cluster_points:
+                        self._save_cluster_assignment(point.id, int(cluster_id))
+                
+                status_msg = f"K-means: {len(clusters)} clusters computed and saved"
+                print(f"DEBUG: Setting status: {status_msg}")
+                self._update_status(status_msg)
+                
+                # Refresh datasheet if it's open to show cluster assignments
+                if self.datasheet_manager.is_datasheet_linked():
+                    self.datasheet_manager.refresh_datasheet_cluster_data(
+                        self.color_points, clusters, self.cluster_manager)
+            else:
+                print("DEBUG: No clusters returned by cluster manager")
+                self.clusters = {}
+                self._update_status("Clustering failed")
             
         except Exception as e:
             logger.exception("K-means clustering failed")
             self._update_status(f"Clustering error: {e}")
             self.clusters = {}
+            self.cluster_manager.clear_clusters()
     
     def _plot_clusters(self):
         """Plot K-means cluster results using sphere or convex hull visualization."""
+        print(f"DEBUG: _plot_clusters called with {len(self.clusters) if self.clusters else 0} clusters")
         if not self.clusters:
+            print("DEBUG: No clusters to plot")
             return
         
+        print(f"DEBUG: Sphere mode: {self.show_spheres.get()}")
         # Choose visualization mode based on sphere toggle
         if self.show_spheres.get():
+            print("DEBUG: Using sphere visualization")
             self._plot_spheres()
             return
+        
+        print("DEBUG: Using convex hull visualization")
         
         # Traditional convex hull visualization
         for i, (label, points) in enumerate(self.clusters.items()):
@@ -654,40 +988,129 @@ class TernaryPlotWindow:
                 except ImportError:
                     pass  # Skip if scipy not available
             
-            # Plot improved centroid (smaller and less intrusive than before)
+            # Plot improved centroid (much more visible)
             centroid_x = np.mean(x_coords)
             centroid_y = np.mean(y_coords)
-            self.ax.scatter(centroid_x, centroid_y, c=color, s=100, marker='x', 
-                          edgecolors='black', linewidths=1.5, zorder=4, alpha=0.8,
+            print(f"DEBUG: Plotting centroid for cluster {label} at ({centroid_x:.4f}, {centroid_y:.4f}) with {len(points)} points")
+            
+            # Make centroids VERY visible
+            self.ax.scatter(centroid_x, centroid_y, c='red', s=300, marker='X', 
+                          edgecolors='black', linewidths=3, zorder=20, alpha=1.0,
                           label=f'Cluster {label} ({len(points)} pts)')
+            
+            # Add text label next to centroid
+            self.ax.text(centroid_x + 0.02, centroid_y + 0.02, f'C{label}', 
+                        fontsize=12, fontweight='bold', color='red', zorder=21)
         
+        print(f"DEBUG: Adding legend for {len(self.clusters)} clusters")
         # Add legend
         self.ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=9)
     
     def _toggle_spheres(self):
         """Toggle sphere visualization mode."""
+        print(f"DEBUG: _toggle_spheres called, spheres: {self.show_spheres.get()}, clusters enabled: {self.show_clusters.get()}")
         if self.show_clusters.get():
+            print("DEBUG: Refreshing plot after sphere toggle")
             self._refresh_plot()
+        else:
+            print("DEBUG: Clusters not enabled, sphere toggle has no effect")
     
     def _update_clusters(self):
         """Update clusters when spinbox changes."""
+        n_clusters_value = self.n_clusters.get()
+        print(f"DEBUG: _update_clusters called, new value: {n_clusters_value}, clusters enabled: {self.show_clusters.get()}")
         if self.show_clusters.get():
+            print(f"DEBUG: Recomputing clusters with {n_clusters_value} clusters")
             self._compute_clusters()
             self._refresh_plot()
+        else:
+            print("DEBUG: Clusters not enabled, spinbox change has no effect")
+    
+    def _on_spinbox_change(self):
+        """Handle spinbox value changes with debouncing to avoid rapid-fire updates."""
+        # Cancel any pending update
+        if hasattr(self, '_spinbox_update_pending'):
+            self.window.after_cancel(self._spinbox_update_pending)
+        
+        # Schedule update after brief delay to debounce rapid changes
+        self._spinbox_update_pending = self.window.after(200, self._update_clusters)
+    
+    def _on_hull_toggle(self):
+        """Handle convex hull checkbox toggle with debugging."""
+        print(f"DEBUG: Convex Hull checkbox clicked! New state: {self.show_hull.get()}")
+        self._refresh_plot()
+    
+    def _on_clusters_toggle(self):
+        """Handle K-means clusters checkbox toggle with debugging."""
+        print(f"DEBUG: K-means Clusters checkbox clicked! New state: {self.show_clusters.get()}")
+        self._toggle_clusters()
+    
+    def _on_spheres_toggle(self):
+        """Handle spheres checkbox toggle with debugging."""
+        print(f"DEBUG: Spheres checkbox clicked! New state: {self.show_spheres.get()}")
+        self._toggle_spheres()
+    
+    def _manual_hull_toggle(self):
+        """Manually handle convex hull checkbox click with delay."""
+        # Use after_idle to ensure checkbox state has been updated by tkinter
+        self.window.after_idle(self._delayed_hull_toggle)
+    
+    def _delayed_hull_toggle(self):
+        """Execute hull toggle after checkbox state update."""
+        # Manually flip the state since tkinter isn't doing it properly
+        current_state = self.show_hull.get()
+        new_state = not current_state
+        self.show_hull.set(new_state)
+        print(f"🔧 MANUAL: Hull checkbox clicked! Changed from {current_state} to {new_state}")
+        print(f"🔧 MANUAL: Calling _refresh_plot() for hull toggle...")
+        self._refresh_plot()
+        print(f"🔧 MANUAL: Hull toggle refresh completed")
+    
+    def _manual_clusters_toggle(self):
+        """Manually handle clusters checkbox click with delay."""
+        # Use after_idle to ensure checkbox state has been updated by tkinter
+        self.window.after_idle(self._delayed_clusters_toggle)
+    
+    def _delayed_clusters_toggle(self):
+        """Execute clusters toggle after checkbox state update."""
+        # Manually flip the state since tkinter isn't doing it properly
+        current_state = self.show_clusters.get()
+        new_state = not current_state
+        self.show_clusters.set(new_state)
+        print(f"🔧 MANUAL: Clusters checkbox clicked! Changed from {current_state} to {new_state}")
+        print(f"🔧 MANUAL: Calling _toggle_clusters() for clusters toggle...")
+        self._toggle_clusters()
+        print(f"🔧 MANUAL: Clusters toggle completed")
+    
+    def _manual_spheres_toggle(self):
+        """Manually handle spheres checkbox click with delay."""
+        # Use after_idle to ensure checkbox state has been updated by tkinter
+        self.window.after_idle(self._delayed_spheres_toggle)
+    
+    def _delayed_spheres_toggle(self):
+        """Execute spheres toggle after checkbox state update."""
+        # Manually flip the state since tkinter isn't doing it properly
+        current_state = self.show_spheres.get()
+        new_state = not current_state
+        self.show_spheres.set(new_state)
+        print(f"🔧 MANUAL: Spheres checkbox clicked! Changed from {current_state} to {new_state}")
+        self._toggle_spheres()
     
     def _rgb_to_ternary_coords(self, rgb):
         """Convert RGB values to ternary coordinates."""
         return self.ternary_plotter.rgb_to_ternary(rgb)
     
     def _show_datasheet_sync_button(self):
-        """Show the datasheet sync button when a datasheet is linked."""
+        """Enable the datasheet sync button when a datasheet is linked."""
         if hasattr(self, 'refresh_from_datasheet_btn'):
-            self.refresh_from_datasheet_btn.pack(side=tk.LEFT, padx=(5, 15))
+            self.refresh_from_datasheet_btn.config(state='normal')
+            self._update_status("Datasheet linked - sync button enabled")
     
     def _hide_datasheet_sync_button(self):
-        """Hide the datasheet sync button when no datasheet is linked."""
+        """Disable the datasheet sync button when no datasheet is linked."""
         if hasattr(self, 'refresh_from_datasheet_btn'):
-            self.refresh_from_datasheet_btn.pack_forget()
+            self.refresh_from_datasheet_btn.config(state='disabled')
+            self._update_status("Datasheet disconnected - sync button disabled")
     
     def _load_data_dialog(self):
         """Open dialog to load different sample set."""
@@ -716,15 +1139,59 @@ class TernaryPlotWindow:
                 if selection:
                     selected_set = sample_sets[selection[0]]
                     self.sample_set_name = selected_set
-                    self.color_points = self.bridge.load_color_points_from_database(selected_set)
+                    self.color_points, db_format = self.bridge.load_color_points_from_database(selected_set)
+                    
+                    # Update format indicator
+                    self._update_format_indicator(db_format)
+                    
+                    # Clear any existing clusters since this is a new database
+                    self.clusters = {}
+                    self.cluster_manager.clear_clusters()
+                    
+                    # Reset cluster UI state
+                    self.show_clusters.set(False)
+                    self.show_spheres.set(False)
+                    self.n_clusters.set(3)
+                    
                     self.window.title(f"RGB Ternary Analysis - {selected_set}")
                     self._refresh_plot()
+                    self._update_status(f"Loaded {selected_set} ({db_format} format) - {len(self.color_points)} points")
+                    print(f"DEBUG: Database loaded: {selected_set}, {len(self.color_points)} points, format: {db_format}")
                     dialog.destroy()
             
             ttk.Button(dialog, text="Load", command=on_load).pack(pady=5)
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load data: {e}")
+    
+    def _reload_current_database(self):
+        """Reload the current database to see persisted changes."""
+        try:
+            if not self.sample_set_name or self.sample_set_name.startswith("External:"):
+                messagebox.showinfo("No Database", "No database sample set loaded to reload.")
+                return
+            
+            # Reload from database
+            original_sample = self.sample_set_name
+            self.color_points, db_format = self.bridge.load_color_points_from_database(original_sample)
+            
+            # Update format indicator
+            self._update_format_indicator(db_format)
+            
+            # Refresh plot
+            self._refresh_plot()
+            
+            # Count points with preferences for feedback
+            points_with_prefs = sum(1 for p in self.color_points 
+                                  if hasattr(p, 'metadata') and 
+                                     (p.metadata.get('marker', '.') != '.' or 
+                                      p.metadata.get('marker_color', 'blue') != 'blue'))
+            
+            self._update_status(f"Reloaded {original_sample}: {len(self.color_points)} points ({points_with_prefs} with saved preferences)")
+            
+        except Exception as e:
+            logger.exception("Failed to reload database")
+            messagebox.showerror("Reload Error", f"Failed to reload database: {e}")
     
     def _load_external_file(self):
         """Load color data from external .ods/.xlsx file."""
@@ -990,17 +1457,41 @@ class TernaryPlotWindow:
                                f"• RGB: R, G, B (0-255 or 0-1)\n"
                                f"• L*a*b*: L*, a*, b* (standard ranges)")
             
-            # Process each row
+            # Process each row - SKIP ROWS 1-7 for Plot_3D format (header + centroids)
+            start_row = 7 if has_plot3d else 0  # Skip first 7 rows for Plot_3D format
+            print(f"DEBUG: Processing rows starting from row {start_row+1} (has_plot3d: {has_plot3d})")
+            
             for i, row in df.iterrows():
+                # Skip reserved rows for Plot_3D format
+                if has_plot3d and i < start_row:
+                    print(f"DEBUG: Skipping reserved row {i+1} (Plot_3D format)")
+                    continue
+                    
                 try:
                     # Get ID (try multiple column names)
                     point_id = None
                     for id_col in ['DataID', 'ID', 'Name', 'Sample', 'Point', 'Label']:
-                        if id_col in df.columns:
-                            point_id = str(row[id_col])
+                        if id_col in df.columns and pd.notna(row[id_col]) and str(row[id_col]).strip():
+                            point_id = str(row[id_col]).strip()
                             break
                     if not point_id:
                         point_id = f"Point_{i+1}"
+                    
+                    print(f"DEBUG: Processing row {i+1} with ID '{point_id}'")
+                    
+                    # Skip rows with empty or invalid coordinate data
+                    if has_plot3d:
+                        # Check for valid Plot_3D coordinates
+                        try:
+                            x_test = float(row[plot3d_cols['x']])
+                            y_test = float(row[plot3d_cols['y']])
+                            z_test = float(row[plot3d_cols['z']])
+                            if not all(0 <= val <= 1 for val in [x_test, y_test, z_test]):
+                                print(f"DEBUG: Skipping row {i+1} - invalid Plot_3D coordinates: {x_test}, {y_test}, {z_test}")
+                                continue
+                        except (ValueError, TypeError, KeyError):
+                            print(f"DEBUG: Skipping row {i+1} - missing or invalid Plot_3D coordinates")
+                            continue
                     
                     # Handle Plot_3D normalized format
                     if has_plot3d:
@@ -1137,83 +1628,66 @@ class TernaryPlotWindow:
             raise Exception(f"Failed to load ODS file: {e}")
     
     def _save_plot(self):
-        """Save current plot to file."""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"ternary_plot_{self.sample_set_name}_{timestamp}.png"
-            
-            filename = filedialog.asksaveasfilename(
-                title="Save Ternary Plot",
-                defaultextension=".png",
-                filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
-                initialfile=default_name
-            )
-            
-            if filename:
-                self.fig.savefig(filename, dpi=300, bbox_inches='tight')
-                self._update_status(f"Plot saved: {os.path.basename(filename)}")
-                
-        except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save plot: {e}")
+        """Save current plot to file using export manager."""
+        self.export_manager.save_plot_image(self.fig, self.sample_set_name)
+    
+    def _save_as_database(self):
+        """Save current color data as a new Ternary database using export manager."""
+        self.export_manager.save_as_database(self.color_points, self.sample_set_name)
     
     def _open_plot3d(self):
-        """Open realtime datasheet with current data (Plot_3D workflow)."""
+        """Open realtime datasheet with current data using datasheet manager."""
         try:
-            # Open realtime datasheet just like Plot_3D does
-            from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+            # Ensure clusters are computed if K-means is enabled
+            if self.show_clusters.get() and self.cluster_manager.has_sklearn():
+                if not hasattr(self, 'clusters') or not self.clusters:
+                    logger.info("K-means enabled but no clusters found, computing...")
+                    self._compute_clusters()
+                else:
+                    logger.info(f"K-means enabled, found {len(self.clusters)} existing clusters")
             
-            # Create datasheet name based on current data
-            if self.external_file_path:
-                datasheet_name = f"Ternary: {os.path.basename(self.external_file_path, '.ods').replace('.xlsx', '')}"
+            # Use datasheet manager to open datasheet
+            datasheet = self.datasheet_manager.open_realtime_datasheet(
+                color_points=self.color_points,
+                clusters=self.clusters if self.clusters else None,
+                sample_set_name=self.sample_set_name,
+                external_file_path=getattr(self, 'external_file_path', None)
+            )
+            
+            if datasheet:
+                # Store legacy reference for backward compatibility
+                self.datasheet_ref = datasheet
+                
+                # Show the "Sync from Datasheet" button now that datasheet is linked
+                self._show_datasheet_sync_button()
+                
+                self._update_status(f"Realtime datasheet opened via manager")
             else:
-                datasheet_name = f"Ternary: {self.sample_set_name}"
+                self._update_status("Failed to open datasheet")
             
-            # Create realtime datasheet (don't load initial data, we'll populate it)
-            datasheet = RealtimePlot3DSheet(
-                parent=self.window,
-                sample_set_name=datasheet_name,
-                load_initial_data=False
-            )
-            
-            # Populate datasheet with current ternary data converted to Plot_3D format
-            self._populate_datasheet_with_current_data(datasheet)
-            
-            # Store reference for bidirectional updates
-            self.datasheet_ref = datasheet
-            
-            # Show the "Sync from Datasheet" button now that datasheet is linked
-            self._show_datasheet_sync_button()
-            
-            # Add back-reference to datasheet for navigation
-            datasheet.ternary_window_ref = self
-            
-            # Add callback for datasheet to save ternary preferences when changes are made
-            datasheet.ternary_save_callback = self._handle_datasheet_changes
-            
-            # Add "Return to Ternary" button to datasheet toolbar
-            if hasattr(datasheet, 'plot3d_btn') and hasattr(datasheet.plot3d_btn, 'pack_info'):
-                # Add button after the Plot_3D button
-                return_btn = ttk.Button(
-                    datasheet.plot3d_btn.master, 
-                    text="Return to Ternary", 
-                    command=self._bring_ternary_to_front
-                )
-                return_btn.pack(side=tk.LEFT, padx=5)
-            
-            self._update_status(f"Realtime datasheet opened: {datasheet_name}")
-            
-            messagebox.showinfo(
-                "Datasheet Ready",
-                f"Realtime datasheet opened with {len(self.color_points)} color points.\n\n"
-                "• Data converted to Plot_3D normalized format (0-1 range)\n"
-                "• Use 'Launch Plot_3D' button in datasheet for 3D visualization\n"
-                "• Edit data in datasheet and refresh ternary plot to see changes"
-            )
-                    
         except Exception as e:
             error_msg = f"Failed to open realtime datasheet: {e}"
             logger.exception(error_msg)
             messagebox.showerror("Datasheet Error", error_msg)
+    
+    def _show_datasheet_ready_dialog(self, point_count, cluster_info):
+        """Show the datasheet ready dialog with proper focus."""
+        try:
+            # Ensure the dialog appears in front
+            if hasattr(self, 'window'):
+                self.window.lift()
+                self.window.focus_force()
+            
+            messagebox.showinfo(
+                "Datasheet Ready",
+                f"Realtime datasheet opened with {point_count} color points.\n\n"
+                "• Data converted to Plot_3D normalized format (0-1 range)\n"
+                "• Use 'Launch Plot_3D' button in datasheet for 3D visualization\n"
+                "• Edit data in datasheet and refresh ternary plot to see changes"
+                f"{cluster_info}"
+            )
+        except Exception as e:
+            logger.exception(f"Error showing dialog: {e}")
     
     def _open_datasheet(self):
         """Open realtime datasheet with current data."""
@@ -1260,7 +1734,46 @@ class TernaryPlotWindow:
                 logger.warning("No color points to populate datasheet")
                 return
                 
-            # Convert ColorPoint objects to Plot_3D normalized format
+            # First, calculate cluster centroids if clusters exist
+            cluster_centroids = {}
+            if hasattr(self, 'clusters') and self.clusters:
+                logger.info(f"DEBUG: Found {len(self.clusters)} clusters for centroid calculation")
+                import matplotlib.pyplot as plt
+                import numpy as np
+                colors = plt.cm.Set3(np.linspace(0, 1, len(self.clusters)))
+                
+                for cluster_idx, (cluster_id, cluster_points) in enumerate(self.clusters.items()):
+                    # Calculate cluster centroid in L*a*b* space
+                    cluster_l = [cp.lab[0] for cp in cluster_points]
+                    cluster_a = [cp.lab[1] for cp in cluster_points]
+                    cluster_b = [cp.lab[2] for cp in cluster_points]
+                    
+                    # Convert centroid to normalized 0-1 range
+                    centroid_l_norm = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
+                    centroid_a_norm = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
+                    centroid_b_norm = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
+                    
+                    # Get cluster sphere color from matplotlib colormap
+                    cluster_color = colors[cluster_idx]
+                    sphere_color = '#{:02x}{:02x}{:02x}'.format(
+                        int(cluster_color[0] * 255),
+                        int(cluster_color[1] * 255), 
+                        int(cluster_color[2] * 255)
+                    )
+                    
+                    cluster_centroids[cluster_id] = {
+                        'centroid_x': centroid_l_norm,
+                        'centroid_y': centroid_a_norm, 
+                        'centroid_z': centroid_b_norm,
+                        'sphere_color': sphere_color,
+                        'sphere_radius': 0.02,
+                        'point_count': len(cluster_points)
+                    }
+                    
+                    # Debug centroid calculation
+                    logger.info(f"DEBUG: Cluster {cluster_id} centroid - L:{centroid_l_norm:.4f}, a:{centroid_a_norm:.4f}, b:{centroid_b_norm:.4f} ({len(cluster_points)} points)")
+            
+            # Convert ColorPoint objects to Plot_3D normalized format (data rows only)
             plot3d_data_rows = []
             
             for i, point in enumerate(self.color_points):
@@ -1275,59 +1788,29 @@ class TernaryPlotWindow:
                 point.metadata['original_rgb'] = point.rgb
                 point.metadata['original_ternary_coords'] = point.ternary_coords
                 
-                # Find cluster assignment and centroid for this point
+                # Find cluster assignment (but no centroid data in individual rows)
                 cluster_assignment = ''
-                centroid_x = centroid_y = centroid_z = ''
-                sphere_color = sphere_radius = ''
                 if hasattr(self, 'clusters') and self.clusters:
                     for cluster_id, cluster_points in self.clusters.items():
                         if point in cluster_points:
                             cluster_assignment = str(cluster_id)
-                            # Calculate cluster centroid in L*a*b* space
-                            cluster_l = [cp.lab[0] for cp in cluster_points]
-                            cluster_a = [cp.lab[1] for cp in cluster_points]
-                            cluster_b = [cp.lab[2] for cp in cluster_points]
-                            
-                            # Convert centroid to normalized 0-1 range
-                            centroid_l_norm = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
-                            centroid_a_norm = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
-                            centroid_b_norm = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
-                            
-                            centroid_x = centroid_l_norm
-                            centroid_y = centroid_a_norm
-                            centroid_z = centroid_b_norm
-                            
-                            # Get cluster sphere color from matplotlib colormap
-                            import matplotlib.pyplot as plt
-                            import numpy as np
-                            colors = plt.cm.Set3(np.linspace(0, 1, len(self.clusters)))
-                            cluster_idx = list(self.clusters.keys()).index(cluster_id)
-                            cluster_color = colors[cluster_idx]
-                            
-                            # Convert matplotlib color to hex
-                            sphere_color = '#{:02x}{:02x}{:02x}'.format(
-                                int(cluster_color[0] * 255),
-                                int(cluster_color[1] * 255), 
-                                int(cluster_color[2] * 255)
-                            )
-                            sphere_radius = '0.02'  # ΔE radius
                             break
                 
-                # Create row data in Plot_3D format
+                # Create row data in Plot_3D format (NO centroid/sphere data in individual rows)
                 row_data = [
                     round(l_norm, 6),      # Xnorm (L*)
                     round(a_norm, 6),      # Ynorm (a*) 
                     round(b_norm, 6),      # Znorm (b*)
                     point.id,              # DataID
-                    cluster_assignment,    # Cluster (from K-means results)
+                    cluster_assignment,    # Cluster (just assignment, no centroid data)
                     '',                    # ∆E (empty - to be calculated)
                     '.',                   # Marker (default)
                     'blue',                # Color (default)
-                    centroid_x,            # Centroid_X (cluster centroid)
-                    centroid_y,            # Centroid_Y (cluster centroid)
-                    centroid_z,            # Centroid_Z (cluster centroid)
-                    sphere_color,          # Sphere (cluster color)
-                    sphere_radius          # Radius (∆E = 0.02)
+                    '',                    # Centroid_X (empty - centroids go in restricted area)
+                    '',                    # Centroid_Y (empty - centroids go in restricted area)
+                    '',                    # Centroid_Z (empty - centroids go in restricted area)
+                    '',                    # Sphere (empty - centroids go in restricted area)
+                    ''                     # Radius (empty - centroids go in restricted area)
                 ]
                 
                 plot3d_data_rows.append(row_data)
@@ -1349,16 +1832,63 @@ class TernaryPlotWindow:
                 # Set headers in row 1 (index 0)
                 datasheet.sheet.set_row_data(0, values=datasheet.PLOT3D_COLUMNS)
                 
-                # Leave rows 2-7 (indices 1-6) empty for centroid data - this is the protected pink area
+                # Populate rows 2-7 (indices 1-6) with SEQUENTIAL CLUSTER DATA in the protected pink area
+                logger.info(f"DEBUG: Populating {len(cluster_centroids)} centroids in rows 2-7")
                 
-                # Insert data starting at row 8 (index 7) as per Plot_3D format
+                # First clear rows 2-7 completely to avoid leftover data
+                for clear_idx in range(1, 7):  # Clear rows 2-7 (indices 1-6)
+                    empty_row = [''] * len(datasheet.PLOT3D_COLUMNS)
+                    datasheet.sheet.set_row_data(clear_idx, values=empty_row)
+                
+                # Sort cluster IDs for consistent placement
+                sorted_cluster_items = sorted(cluster_centroids.items(), key=lambda x: int(x[0]))
+                logger.info(f"DEBUG: Processing clusters in order: {[cid for cid, _ in sorted_cluster_items]}")
+                
+                centroid_row_index = 1  # Start at row 2 (index 1)
+                for cluster_id, centroid_data in sorted_cluster_items:
+                    if centroid_row_index >= 7:  # Don't exceed reserved area
+                        logger.warning(f"DEBUG: Too many clusters, skipping cluster {cluster_id}")
+                        break
+                    
+                    # Create centroid row with cluster data only
+                    centroid_row = [
+                        centroid_data['centroid_x'],     # Xnorm (cluster centroid L*)
+                        centroid_data['centroid_y'],     # Ynorm (cluster centroid a*)
+                        centroid_data['centroid_z'],     # Znorm (cluster centroid b*)
+                        f"Cluster_{cluster_id}",         # DataID (cluster identifier)
+                        str(cluster_id),                 # Cluster (cluster ID)
+                        '',                              # ΔE (empty)
+                        'x',                             # Marker (centroid marker)
+                        centroid_data['sphere_color'],   # Color (cluster color)
+                        centroid_data['centroid_x'],     # Centroid_X (self-reference)
+                        centroid_data['centroid_y'],     # Centroid_Y (self-reference)
+                        centroid_data['centroid_z'],     # Centroid_Z (self-reference)
+                        centroid_data['sphere_color'],   # Sphere (cluster sphere color)
+                        centroid_data['sphere_radius']   # Radius (sphere radius)
+                    ]
+                    
+                    logger.info(f"DEBUG: Placing Cluster {cluster_id} in row {centroid_row_index + 1} (index {centroid_row_index})")
+                    datasheet.sheet.set_row_data(centroid_row_index, values=centroid_row)
+                    centroid_row_index += 1
+                
+                logger.info(f"Populated {len(cluster_centroids)} cluster centroids in rows 2-{centroid_row_index}")
+                
+                # Insert individual data points starting at row 8 (index 7) as per Plot_3D format
                 for i, row_data in enumerate(plot3d_data_rows):
                     row_index = 7 + i  # Start at row 7 (display row 8)
                     datasheet.sheet.set_row_data(row_index, values=row_data)
                 
+                logger.info(f"Populated {len(plot3d_data_rows)} data rows starting at row 8")
+                
                 # Apply proper formatting and validation
                 datasheet._apply_formatting()
                 datasheet._setup_validation()
+                
+                # Force refresh the datasheet display
+                if hasattr(datasheet.sheet, 'refresh'):
+                    datasheet.sheet.refresh()
+                elif hasattr(datasheet.sheet, 'update'):
+                    datasheet.sheet.update()
                 
                 logger.info(f"Populated datasheet with {len(plot3d_data_rows)} data rows in proper Plot_3D format")
                 logger.info(f"Headers in row 1, protected area in rows 2-7, data starts at row 8")
@@ -1429,20 +1959,82 @@ class TernaryPlotWindow:
             marker = row_data[6] if len(row_data) > 6 else '.'  # Marker column
             color = row_data[7] if len(row_data) > 7 else 'blue'  # Color column
             
-            # Save to ternary-specific database columns
-            success = self._save_ternary_preferences_to_db(
-                point_id=data_id,
-                marker=marker,
-                color=color
-            )
-            
-            if success:
-                logger.debug(f"Saved ternary preferences from datasheet: {data_id} -> marker={marker}, color={color}")
+            # Check if this is a cluster centroid row (in restricted area)
+            if data_id.startswith('Cluster_'):
+                cluster_id = data_id.replace('Cluster_', '')
+                self._handle_cluster_centroid_changes(cluster_id, row_data)
             else:
-                logger.warning(f"Failed to save ternary preferences from datasheet for {data_id}")
+                # Regular data point - save individual preferences
+                success = self._save_ternary_preferences_to_db(
+                    point_id=data_id,
+                    marker=marker,
+                    color=color
+                )
+                
+                if success:
+                    logger.debug(f"Saved ternary preferences from datasheet: {data_id} -> marker={marker}, color={color}")
+                else:
+                    logger.warning(f"Failed to save ternary preferences from datasheet for {data_id}")
                 
         except Exception as e:
             logger.exception(f"Error handling datasheet changes: {e}")
+    
+    def _handle_cluster_centroid_changes(self, cluster_id: str, centroid_row_data):
+        """Handle changes to cluster centroid and propagate to all cluster members."""
+        try:
+            if not (hasattr(self, 'clusters') and self.clusters):
+                return
+            
+            cluster_id_int = int(cluster_id)
+            if cluster_id_int not in self.clusters:
+                return
+                
+            # Extract centroid changes
+            centroid_color = centroid_row_data[7] if len(centroid_row_data) > 7 else None  # Color column
+            sphere_color = centroid_row_data[11] if len(centroid_row_data) > 11 else None  # Sphere column
+            sphere_radius = centroid_row_data[12] if len(centroid_row_data) > 12 else None  # Radius column
+            
+            logger.info(f"Cluster {cluster_id} centroid changed: color={centroid_color}, sphere={sphere_color}, radius={sphere_radius}")
+            
+            # Apply changes to ALL members of this cluster
+            cluster_points = self.clusters[cluster_id_int]
+            updated_count = 0
+            
+            for point in cluster_points:
+                try:
+                    # Parse point ID to get image_name and coordinate_point
+                    if '_pt' in point.id:
+                        image_name, pt_part = point.id.rsplit('_pt', 1)
+                        coordinate_point = int(pt_part)
+                    else:
+                        image_name = point.id
+                        coordinate_point = 1
+                    
+                    # Update database with cluster-wide changes
+                    success = self._save_ternary_preferences_to_db(
+                        point_id=point.id,
+                        marker=None,  # Don't change individual markers
+                        color=centroid_color if centroid_color else None
+                    )
+                    
+                    if success:
+                        updated_count += 1
+                        # Update point metadata for immediate refresh
+                        if not hasattr(point, 'metadata'):
+                            point.metadata = {}
+                        if centroid_color:
+                            point.metadata['marker_color'] = centroid_color
+                    
+                except Exception as point_error:
+                    logger.warning(f"Failed to update cluster member {point.id}: {point_error}")
+            
+            logger.info(f"Updated {updated_count} points in cluster {cluster_id} with centroid changes")
+            
+            # Refresh the ternary plot to show changes
+            self._refresh_plot_only()
+            
+        except Exception as e:
+            logger.exception(f"Error handling cluster centroid changes for cluster {cluster_id}: {e}")
     
     def _refresh_datasheet_cluster_data(self):
         """Refresh cluster data in the open datasheet."""
@@ -1479,37 +2071,42 @@ class TernaryPlotWindow:
                         centroid_x = centroid_y = centroid_z = ''
                         sphere_color = sphere_radius = ''
                         
-                        for cluster_id, cluster_points in self.clusters.items():
-                            if matching_point in cluster_points:
-                                cluster_assignment = str(cluster_id)
+                        # Use cluster manager to get cluster assignment
+                        cluster_assignment = self.cluster_manager.get_cluster_assignment(matching_point)
+                        
+                        if cluster_assignment:
+                            # Get centroid data from cluster manager
+                            try:
+                                centroids = self.cluster_manager.calculate_centroids()
+                                cluster_id_int = int(cluster_assignment)
                                 
-                                # Calculate cluster centroid
-                                cluster_l = [cp.lab[0] for cp in cluster_points]
-                                cluster_a = [cp.lab[1] for cp in cluster_points]
-                                cluster_b = [cp.lab[2] for cp in cluster_points]
-                                
-                                centroid_l_norm = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
-                                centroid_a_norm = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
-                                centroid_b_norm = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
-                                
-                                centroid_x = centroid_l_norm
-                                centroid_y = centroid_a_norm
-                                centroid_z = centroid_b_norm
-                                
-                                # Get sphere color
-                                import matplotlib.pyplot as plt
-                                import numpy as np
-                                colors = plt.cm.Set3(np.linspace(0, 1, len(self.clusters)))
-                                cluster_idx = list(self.clusters.keys()).index(cluster_id)
-                                cluster_color = colors[cluster_idx]
-                                
-                                sphere_color = '#{:02x}{:02x}{:02x}'.format(
-                                    int(cluster_color[0] * 255),
-                                    int(cluster_color[1] * 255), 
-                                    int(cluster_color[2] * 255)
-                                )
-                                sphere_radius = '0.02'
-                                break
+                                if cluster_id_int in centroids:
+                                    centroid_data = centroids[cluster_id_int]
+                                    centroid_x = centroid_data['centroid_x']
+                                    centroid_y = centroid_data['centroid_y']
+                                    centroid_z = centroid_data['centroid_z']
+                                    sphere_color = centroid_data['sphere_color']
+                                    sphere_radius = str(centroid_data['sphere_radius'])
+                                    
+                            except Exception as centroid_error:
+                                logger.warning(f"Failed to get centroids from cluster manager: {centroid_error}")
+                                # Fallback to legacy calculation
+                                for cluster_id, cluster_points in self.clusters.items():
+                                    if matching_point in cluster_points:
+                                        cluster_assignment = str(cluster_id)
+                                        
+                                        # Calculate cluster centroid (legacy)
+                                        cluster_l = [cp.lab[0] for cp in cluster_points]
+                                        cluster_a = [cp.lab[1] for cp in cluster_points]
+                                        cluster_b = [cp.lab[2] for cp in cluster_points]
+                                        
+                                        centroid_x = round(sum(cluster_l) / len(cluster_l) / 100.0, 6)
+                                        centroid_y = round((sum(cluster_a) / len(cluster_a) + 127.5) / 255.0, 6)
+                                        centroid_z = round((sum(cluster_b) / len(cluster_b) + 127.5) / 255.0, 6)
+                                        
+                                        sphere_color = '#808080'  # Gray fallback
+                                        sphere_radius = '0.02'
+                                        break
                                 
                         # Update the cluster and centroid data if assignment found
                         if cluster_assignment:
@@ -1705,84 +2302,186 @@ class TernaryPlotWindow:
             logger.exception(f"Failed to sync from datasheet: {e}")
             raise
     
+    
+    def _update_status(self, message: str):
+        """Update status bar with message."""
+        if hasattr(self, 'status_bar'):
+            self.status_bar.config(text=message)
+    
+    def _update_format_indicator(self, db_format: str):
+        """Update the database format indicator with appropriate styling.
+        
+        Args:
+            db_format: 'NORMALIZED', 'ACTUAL_LAB', 'MIXED', or 'UNKNOWN'
+        """
+        if not hasattr(self, 'format_indicator'):
+            return
+            
+        # Format-specific styling
+        format_styles = {
+            'ACTUAL_LAB': {
+                'text': '✅ ACTUAL LAB',
+                'foreground': 'darkgreen',
+                'background': 'lightgreen'
+            },
+            'NORMALIZED': {
+                'text': '🔧 NORMALIZED', 
+                'foreground': 'darkorange',
+                'background': 'lightyellow'
+            },
+            'MIXED': {
+                'text': '⚠️ MIXED',
+                'foreground': 'darkred',
+                'background': 'lightpink'
+            },
+            'UNKNOWN': {
+                'text': '❓ UNKNOWN',
+                'foreground': 'gray',
+                'background': 'lightgray'
+            }
+        }
+        
+        style = format_styles.get(db_format, format_styles['UNKNOWN'])
+        
+        self.format_indicator.config(
+            text=style['text'],
+            foreground=style['foreground'],
+            background=style['background']
+        )
+        
+        # Add tooltip for more information
+        tooltip_text = {
+            'ACTUAL_LAB': 'Database contains proper L*a*b* values (L*: 0-100, a*b*: ±127.5)',
+            'NORMALIZED': 'Database contains normalized values (0-1 range) - auto-correcting',
+            'MIXED': 'Database contains mixed formats - using heuristic detection',
+            'UNKNOWN': 'Could not determine database format'
+        }
+        
+        # Simple tooltip implementation
+        tooltip = tooltip_text.get(db_format, 'Format detection status')
+        self.format_indicator.config(text=f"{style['text']}")  # Keep it simple for now
+    
     def _on_plot_click(self, event):
-        """Handle clicks on the ternary plot for point selection."""
+        """Handle clicks on the plot for point identification and selection."""
         if event.inaxes != self.ax or not self.color_points:
             return
-            
-        # Find closest point to click
-        click_x, click_y = event.xdata, event.ydata
-        if click_x is None or click_y is None:
-            return
-            
-        min_distance = float('inf')
-        closest_point_idx = None
         
-        for i, point in enumerate(self.color_points):
-            if hasattr(point, 'ternary_coords') and point.ternary_coords:
-                x, y = point.ternary_coords[0], point.ternary_coords[1]
-                distance = ((x - click_x) ** 2 + (y - click_y) ** 2) ** 0.5
+        try:
+            # Find the closest point to the click
+            click_x, click_y = event.xdata, event.ydata
+            if click_x is None or click_y is None:
+                return
+            
+            closest_point_idx = None
+            min_distance = float('inf')
+            
+            for i, point in enumerate(self.color_points):
+                if not hasattr(point, 'ternary_coords') or point.ternary_coords is None:
+                    continue
+                
+                point_x, point_y = point.ternary_coords[0], point.ternary_coords[1]
+                distance = ((click_x - point_x) ** 2 + (click_y - point_y) ** 2) ** 0.5
+                
                 if distance < min_distance:
                     min_distance = distance
                     closest_point_idx = i
-        
-        # Only select if click is reasonably close (within 0.12 units for easier clicking)
-        if min_distance < 0.12 and closest_point_idx is not None:
-            # Toggle selection
-            if not hasattr(self, 'selected_points'):
-                self.selected_points = set()
-                
-            if closest_point_idx in self.selected_points:
-                self.selected_points.remove(closest_point_idx)
-                status_msg = f"Deselected: {self.color_points[closest_point_idx].id}"
-            else:
-                self.selected_points.add(closest_point_idx)
-                point = self.color_points[closest_point_idx]
-                
-                # Build detailed info string with dataset info
-                info_parts = []
-                
-                # Extract dataset name from point ID (e.g., "S10_pt1" -> "S10")
-                dataset_name = "Unknown"
-                if '_pt' in point.id:
-                    dataset_name = point.id.split('_pt')[0]
-                elif point.id:
-                    dataset_name = point.id
-                
-                info_parts.append(f"📊 DATASET: {dataset_name}")
-                info_parts.append(f"ID: {point.id}")
-                info_parts.append(f"RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})")
-                
-                # Add cluster info if available
-                if hasattr(self, 'clusters') and self.clusters:
-                    for cluster_id, cluster_points in self.clusters.items():
-                        if point in cluster_points:
-                            info_parts.append(f"🔗 CLUSTER: {cluster_id}")
-                            break
-                
-                if hasattr(point, 'metadata'):
-                    if 'marker' in point.metadata and point.metadata['marker']:
-                        info_parts.append(f"Marker: {point.metadata['marker']}")
-                    if 'marker_color' in point.metadata and point.metadata['marker_color']:
-                        info_parts.append(f"Color: {point.metadata['marker_color']}")
-                
-                status_msg = "🎯 SELECTED: " + " | ".join(info_parts)
             
-            self._update_status(status_msg)
-            
-            # Refresh plot to show selection changes
-            self._refresh_plot_only()  # Use _only to avoid datasheet sync during selection
-        else:
-            # Click not close to any point - clear selection if any exists
-            if hasattr(self, 'selected_points') and self.selected_points:
-                self.selected_points.clear()
-                self._update_status("Selection cleared")
+            # Only select if click is reasonably close to a point (within 0.05 units)
+            if closest_point_idx is not None and min_distance < 0.05:
+                # Clear previous labels
+                for label in self.point_labels:
+                    try:
+                        label.remove()
+                    except:
+                        pass
+                self.point_labels.clear()
+                
+                # Toggle selection
+                if closest_point_idx in self.selected_points:
+                    self.selected_points.remove(closest_point_idx)
+                else:
+                    # Clear other selections for single-select behavior
+                    self.selected_points.clear()
+                    self.selected_points.add(closest_point_idx)
+                
+                # Show point information if selected
+                if closest_point_idx in self.selected_points:
+                    point = self.color_points[closest_point_idx]
+                    self._show_point_info(point, closest_point_idx)
+                
+                # Refresh plot to show selection highlighting
                 self._refresh_plot_only()
+            
+        except Exception as e:
+            logger.exception(f"Error handling plot click: {e}")
     
-    def _update_status(self, message: str):
-        """Update status bar."""
-        if hasattr(self, 'status_bar'):
-            self.status_bar.config(text=message)
+    def _show_point_info(self, point, point_index):
+        """Show information about the selected point."""
+        try:
+            # Create info text
+            info_lines = [f"🔍 Point: {point.id}"]
+            
+            # Add RGB and Lab values
+            info_lines.append(f"RGB: ({point.rgb[0]:.1f}, {point.rgb[1]:.1f}, {point.rgb[2]:.1f})")
+            info_lines.append(f"L*a*b*: ({point.lab[0]:.1f}, {point.lab[1]:.1f}, {point.lab[2]:.1f})")
+            
+            # Add ternary coordinates
+            if hasattr(point, 'ternary_coords'):
+                x, y = point.ternary_coords[0], point.ternary_coords[1]
+                info_lines.append(f"Ternary: ({x:.3f}, {y:.3f})")
+            
+            # Add metadata if available
+            if hasattr(point, 'metadata') and point.metadata:
+                if 'image_name' in point.metadata:
+                    info_lines.append(f"Image: {point.metadata['image_name']}")
+                if 'coordinate_point' in point.metadata:
+                    info_lines.append(f"Point #{point.metadata['coordinate_point']}")
+            
+            # Check if point is in a cluster
+            cluster_info = ""
+            if hasattr(self, 'clusters') and self.clusters:
+                for cluster_id, cluster_points in self.clusters.items():
+                    if point in cluster_points:
+                        cluster_info = f" (Cluster {cluster_id})"
+                        break
+            
+            # Display info in status bar
+            status_text = f"Selected: {point.id}{cluster_info} | " + " | ".join(info_lines[1:])
+            self._update_status(status_text)
+            
+            # Add floating label near the point
+            point_x, point_y = point.ternary_coords[0], point.ternary_coords[1]
+            
+            # Main label with DataID
+            main_label = self.ax.annotate(
+                f"{point.id}{cluster_info}",
+                (point_x, point_y),
+                xytext=(10, 15),
+                textcoords='offset points',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.8, edgecolor='black'),
+                fontsize=10,
+                fontweight='bold',
+                zorder=10
+            )
+            
+            # Secondary label with color info
+            color_label = self.ax.annotate(
+                f"RGB({point.rgb[0]:.0f},{point.rgb[1]:.0f},{point.rgb[2]:.0f})",
+                (point_x, point_y),
+                xytext=(10, -5),
+                textcoords='offset points',
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
+                fontsize=8,
+                zorder=10
+            )
+            
+            self.point_labels.extend([main_label, color_label])
+            self.canvas.draw()
+            
+            logger.info(f"Selected point: {point.id} at index {point_index}")
+            
+        except Exception as e:
+            logger.exception(f"Error showing point info: {e}")
             self.window.update_idletasks()
         else:
             logger.info(message)
@@ -1852,8 +2551,32 @@ class TernaryPlotWindow:
         except Exception as e:
             raise Exception(f"Could not create spectral analyzer: {e}")
     
+    def _export_data(self):
+        """Export current color data using export manager with Plot_3D format compatibility."""
+        # Ensure clusters are computed if K-means is enabled
+        if self.show_clusters.get() and self.cluster_manager.has_sklearn() and (not hasattr(self, 'clusters') or not self.clusters):
+            logger.info("Computing clusters for export...")
+            self._compute_clusters()
+        
+        # Use export manager to handle the export
+        self.export_manager.export_data(
+            color_points=self.color_points,
+            clusters=self.clusters if self.clusters else None,
+            cluster_manager=self.cluster_manager,
+            sample_set_name=self.sample_set_name
+        )
+    
     def _on_close(self):
         """Handle window close."""
+        try:
+            # Clean up datasheet references
+            if self.datasheet_manager.is_datasheet_linked():
+                self.datasheet_manager.close_datasheet()
+                self._hide_datasheet_sync_button()
+                logger.info("Cleaned up datasheet references on window close")
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
+        
         self.window.destroy()
 
 
@@ -1870,8 +2593,9 @@ def demo_ternary_window():
     sample_sets = bridge.get_available_sample_sets()
     
     if sample_sets:
-        points = bridge.load_color_points_from_database(sample_sets[0])
-        window = TernaryPlotWindow(parent=root, sample_set_name=sample_sets[0], color_points=points)
+        points, db_format = bridge.load_color_points_from_database(sample_sets[0])
+        window = TernaryPlotWindow(parent=root, sample_set_name=sample_sets[0], 
+                                 color_points=points, db_format=db_format)
         root.mainloop()
     else:
         print("❌ No sample data available for demo")

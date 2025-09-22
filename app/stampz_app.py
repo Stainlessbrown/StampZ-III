@@ -341,11 +341,13 @@ class StampZApp:
     def _run_ternary_analysis(self, sample_set: str, show_hull: bool = True, launch_plot3d: bool = False, display_mode: str = "interactive"):
         """Run ternary analysis with optional Plot_3D integration."""
         try:
-            # Load color points
-            color_points = self._color_bridge.load_color_points_from_database(sample_set)
+            # Load color points with format detection
+            color_points, db_format = self._color_bridge.load_color_points_from_database(sample_set)
             if not color_points:
                 messagebox.showwarning("Advanced Color Visualization", "No color points were loaded.")
                 return
+            
+            logger.info(f"Loaded {len(color_points)} color points from {sample_set} (Format: {db_format})")
             
             if display_mode == "interactive":
                 # Open interactive ternary window (Plot_3D style)
@@ -358,7 +360,8 @@ class StampZApp:
                         parent=self.root,
                         sample_set_name=sample_set,
                         color_points=color_points,
-                        app_ref=self  # Pass app reference for integration features
+                        app_ref=self,  # Pass app reference for integration features
+                        db_format=db_format  # Pass detected database format
                     )
                     
                     logger.info(f"Ternary window created, setting options...")

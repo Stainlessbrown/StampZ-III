@@ -55,7 +55,7 @@ class ColorDataBridge:
     
     def load_color_points_from_database(self, sample_set_name: str, 
                                       image_filter: Optional[str] = None,
-                                      limit: Optional[int] = None) -> List[ColorPoint]:
+                                      limit: Optional[int] = None) -> Tuple[List[ColorPoint], str]:
         """Load color data from database and convert to ColorPoint objects.
         
         Args:
@@ -64,7 +64,7 @@ class ColorDataBridge:
             limit: Optional limit on number of points to load
             
         Returns:
-            List of ColorPoint objects ready for advanced plotting
+            Tuple of (List of ColorPoint objects, detected database format string)
         """
         color_points = []
         
@@ -85,26 +85,125 @@ class ColorDataBridge:
             
             print(f"Loaded {len(measurements)} measurements from {sample_set_name}")
             
+            # INTELLIGENT FORMAT DETECTION: Determine if database contains normalized or actual Lab values
+            db_format = self._detect_database_format(measurements, sample_set_name)
+            print(f"🔍 DATABASE FORMAT DETECTION: {sample_set_name} appears to contain {db_format} values")
+            
             # Convert each measurement to a ColorPoint
             for i, measurement in enumerate(measurements):
                 try:
-                    # Extract required data
-                    lab = (
-                        measurement.get('l_value', 50.0),
-                        measurement.get('a_value', 0.0),
-                        measurement.get('b_value', 0.0)
-                    )
-                    
-                    rgb = (
-                        measurement.get('rgb_r', 128.0),
-                        measurement.get('rgb_g', 128.0),
-                        measurement.get('rgb_b', 128.0)
-                    )
-                    
-                    # Generate unique ID for this point
+                    # Generate unique ID for this point (needed for debug messages)
                     image_name = measurement.get('image_name', 'unknown')
                     coord_point = measurement.get('coordinate_point', i+1)
                     point_id = f"{image_name}_pt{coord_point}"
+                    
+                    # Extract required data
+                    raw_l = measurement.get('l_value', 50.0)
+                    raw_a = measurement.get('a_value', 0.0)
+                    raw_b = measurement.get('b_value', 0.0)
+                    
+                    # Apply format correction based on detected database format
+                    if db_format == 'NORMALIZED':
+                        # Database contains normalized values - convert to actual Lab values
+                        corrected_l = raw_l * 100.0  # 0-1 → 0-100
+                        corrected_a = (raw_a * 255.0) - 127.5  # 0-1 → -127.5 to +127.5 
+                        corrected_b = (raw_b * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
+                        lab = (corrected_l, corrected_a, corrected_b)
+                        
+                        if i < 3:  # Log first few corrections
+                            print(f"🔧 DENORMALIZATION: Point {i} - DB normalized ({raw_l:.4f}, {raw_a:.4f}, {raw_b:.4f}) → Lab ({corrected_l:.2f}, {corrected_a:.2f}, {corrected_b:.2f})")
+                    elif db_format == 'ACTUAL_LAB':
+                        # Database contains actual Lab values - use as-is
+                        lab = (raw_l, raw_a, raw_b)
+                        if i < 3:
+                            print(f"✅ ACTUAL LAB: Point {i} - Using Lab values as-is ({raw_l:.2f}, {raw_a:.2f}, {raw_b:.2f})")
+                    else:
+                        # MIXED or UNKNOWN - apply heuristic per-point detection (fallback)
+                        if (0.0 <= raw_l <= 1.0 and abs(raw_a) <= 1.0 and abs(raw_b) <= 1.0):
+                            corrected_l = raw_l * 100.0
+                            corrected_a = (raw_a * 255.0) - 127.5
+                            corrected_b = (raw_b * 255.0) - 127.5
+                            lab = (corrected_l, corrected_a, corrected_b)
+                            if i < 3:
+                                print(f"⚠️ HEURISTIC CORRECTION: Point {i} - ({raw_l:.4f}, {raw_a:.4f}, {raw_b:.4f}) → Lab ({corrected_l:.2f}, {corrected_a:.2f}, {corrected_b:.2f})")
+                        else:
+                            lab = (raw_l, raw_a, raw_b)
+                    
+                    # Get stored RGB values
+                    stored_rgb = (
+                        measurement.get('rgb_r', 0.0),
+                        measurement.get('rgb_g', 0.0),
+                        measurement.get('rgb_b', 0.0)
+                    )
+                    
+                    # Check if RGB values are valid (not all zeros)
+                    if stored_rgb == (0.0, 0.0, 0.0) or max(stored_rgb) == 0.0:
+                        # RGB values are invalid - calculate from L*a*b* values
+                        if i < 5:  # Debug first few points
+                            print(f"DEBUG: Point {i} ({point_id}) - Invalid RGB {stored_rgb}, Lab values: {lab}")
+                        
+                        try:
+                            from colorspacious import cspace_convert
+                            # Convert L*a*b* to RGB (sRGB1 gives 0-1 range)
+                            rgb_01 = cspace_convert(lab, "CIELab", "sRGB1")
+                            # Convert to 0-255 range with proper clamping
+                            rgb = tuple(max(0, min(255, c * 255)) for c in rgb_01)
+                            
+                            if i < 5:  # Debug first few conversions
+                                print(f"DEBUG: Colorspacious - Lab{lab} -> RGB_0-1{rgb_01} -> RGB_0-255{rgb}")
+                        except (ImportError, Exception) as conv_error:
+                            if i < 3:
+                                print(f"DEBUG: Colorspacious failed ({conv_error}), using fallback conversion")
+                            
+                            # Improved fallback: Better Lab->RGB approximation that preserves color variety
+                            l, a, b_lab = lab
+                            
+                            # Normalize L* (0-100) to reasonable lightness
+                            l_norm = max(0, min(100, l)) / 100.0
+                            
+                            # Handle a* and b* values more carefully
+                            # a* (green-red): negative=green, positive=red  
+                            # b* (blue-yellow): negative=blue, positive=yellow
+                            a_val = max(-128, min(127, a))  # -128 to +127
+                            b_val_lab = max(-128, min(127, b_lab))  # -128 to +127
+                            
+                            # Convert Lab to RGB using more accurate approximation
+                            # Base lightness component
+                            base = l_norm * 255
+                            
+                            # a* affects Red-Green balance
+                            if a_val > 0:  # Positive a* = more red
+                                r = base + (a_val * 0.8)  # Boost red
+                                g = base - (a_val * 0.4)  # Reduce green
+                            else:  # Negative a* = more green  
+                                r = base + (a_val * 0.4)  # Reduce red (a* is negative)
+                                g = base - (a_val * 0.8)  # Boost green (double negative = positive)
+                            
+                            # b* affects Blue-Yellow balance
+                            if b_val_lab > 0:  # Positive b* = more yellow (boost red+green, reduce blue)
+                                r += (b_val_lab * 0.3)
+                                g += (b_val_lab * 0.3)  
+                                b_val = base - (b_val_lab * 0.6)  # Reduce blue
+                            else:  # Negative b* = more blue (reduce red+green, boost blue)
+                                r += (b_val_lab * 0.2)  # Reduce red (b* is negative)
+                                g += (b_val_lab * 0.2)  # Reduce green (b* is negative)
+                                b_val = base - (b_val_lab * 0.8)  # Boost blue (double negative = positive)
+                            
+                            # Clamp to valid RGB range
+                            r = max(0, min(255, r))
+                            g = max(0, min(255, g))
+                            b_val = max(0, min(255, b_val))
+                            rgb = (r, g, b_val)
+                            
+                            if i < 3:
+                                print(f"DEBUG: Fallback Lab{lab} -> L*:{l:.1f}, a*:{a_val}, b*:{b_val_lab} -> RGB{rgb}")
+                    else:
+                        # Use stored RGB values
+                        rgb = stored_rgb
+                        if i < 3:
+                            print(f"DEBUG: Point {i} using stored RGB: {rgb}")
+                    
+                    # point_id already created above for consistency
                     
                     # Convert RGB to ternary coordinates
                     ternary_coords = self.ternary_plotter.rgb_to_ternary(rgb)
@@ -155,11 +254,11 @@ class ColorDataBridge:
                     continue
             
             print(f"Successfully converted {len(color_points)} measurements to ColorPoint objects")
-            return color_points
+            return color_points, db_format
             
         except Exception as e:
             print(f"Error loading color points from {sample_set_name}: {e}")
-            return []
+            return [], 'UNKNOWN'
     
     def load_color_points_from_ods(self, ods_file_path: str, 
                                  sheet_name: Optional[str] = None) -> List[ColorPoint]:
@@ -389,6 +488,72 @@ class ColorDataBridge:
         stats['sample_sets'] = sorted(list(sample_sets))
         
         return stats
+    
+    def _detect_database_format(self, measurements: List[Dict[str, Any]], sample_set_name: str) -> str:
+        """Intelligently detect whether database contains normalized (0-1) or actual Lab values.
+        
+        Args:
+            measurements: List of measurement dictionaries from database
+            sample_set_name: Name of the sample set for logging
+            
+        Returns:
+            'NORMALIZED', 'ACTUAL_LAB', 'MIXED', or 'UNKNOWN'
+        """
+        if not measurements:
+            return 'UNKNOWN'
+        
+        # Analyze a sample of measurements to determine format
+        sample_size = min(50, len(measurements))  # Check up to 50 measurements
+        sample_measurements = measurements[:sample_size]
+        
+        normalized_count = 0
+        actual_lab_count = 0
+        
+        for measurement in sample_measurements:
+            l_val = measurement.get('l_value', 50.0)
+            a_val = measurement.get('a_value', 0.0)
+            b_val = measurement.get('b_value', 0.0)
+            
+            # Skip invalid/null values
+            if l_val is None or a_val is None or b_val is None:
+                continue
+                
+            # Normalized format indicators:
+            # - L* in range 0-1 (typical: 0.2-0.9)
+            # - a* and b* in range 0-1 (with 0.5 being neutral)
+            if (0.0 <= l_val <= 1.0 and 0.0 <= a_val <= 1.0 and 0.0 <= b_val <= 1.0):
+                normalized_count += 1
+            
+            # Actual Lab format indicators:
+            # - L* in range 0-100 (typical: 20-90)
+            # - a* and b* in range -127.5 to +127.5 (typical: -50 to +50)
+            elif (0.0 <= l_val <= 100.0 and -127.5 <= a_val <= 127.5 and -127.5 <= b_val <= 127.5 and
+                  (l_val > 1.0 or abs(a_val) > 1.0 or abs(b_val) > 1.0)):
+                actual_lab_count += 1
+        
+        total_analyzed = normalized_count + actual_lab_count
+        
+        if total_analyzed == 0:
+            return 'UNKNOWN'
+        
+        # Determine format based on predominant pattern
+        normalized_ratio = normalized_count / total_analyzed
+        actual_lab_ratio = actual_lab_count / total_analyzed
+        
+        print(f"🔍 FORMAT ANALYSIS: {sample_set_name}")
+        print(f"   Analyzed: {total_analyzed}/{sample_size} measurements")
+        print(f"   Normalized pattern: {normalized_count} ({normalized_ratio*100:.1f}%)")
+        print(f"   Actual Lab pattern: {actual_lab_count} ({actual_lab_ratio*100:.1f}%)")
+        
+        # Decision thresholds
+        if normalized_ratio >= 0.8:
+            return 'NORMALIZED'
+        elif actual_lab_ratio >= 0.8:
+            return 'ACTUAL_LAB'
+        elif normalized_ratio > 0.1 and actual_lab_ratio > 0.1:
+            return 'MIXED'
+        else:
+            return 'UNKNOWN'
 
 
 def demo_data_bridge():
@@ -409,7 +574,8 @@ def demo_data_bridge():
         first_set = sample_sets[0]
         print(f"\n🔍 Loading data from '{first_set}'...")
         
-        color_points = bridge.load_color_points_from_database(first_set, limit=20)
+        color_points, db_format = bridge.load_color_points_from_database(first_set, limit=20)
+        print(f"📋 Database Format Detected: {db_format}")
         
         if color_points:
             print(f"✅ Loaded {len(color_points)} color points")

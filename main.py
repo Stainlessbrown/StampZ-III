@@ -72,6 +72,78 @@ def launch_full_stampz():
             pass
 
 
+def launch_ternary_viewer():
+    """Launch Ternary Plot Viewer."""
+    try:
+        print("🎨 Starting Ternary Plot Viewer...")
+        
+        from utils.color_data_bridge import ColorDataBridge
+        from gui.ternary_plot_window import TernaryPlotWindow
+        import tkinter as tk
+        from tkinter import messagebox
+        
+        # Check for available databases
+        bridge = ColorDataBridge()
+        sample_sets = bridge.get_available_sample_sets()
+        
+        print(f"Found {len(sample_sets)} available databases: {sample_sets}")
+        
+        if not sample_sets:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo(
+                "No Databases Found",
+                "No color analysis databases were found.\n\n"
+                "Run color analysis in StampZ-III first to create databases."
+            )
+            root.destroy()
+            return
+        
+        # Create ternary window without auto-loading any database
+        # User will choose database via "Load Database" button in the window
+        print("Creating ternary window - user will select database...")
+        
+        # Create a root window to avoid Tkinter variable errors
+        root = tk.Tk()
+        root.withdraw()  # Hide it immediately
+        
+        ternary_window = TernaryPlotWindow(
+            parent=None,  # Orphaned - no parent
+            sample_set_name="No Database Selected",  # Will be updated when user selects
+            color_points=[],  # Empty initially
+            db_format='UNKNOWN'  # Will be detected when database is loaded
+        )
+        
+        print("Ternary window created successfully!")
+        print("Use 'Load Database' button to select which database to analyze.")
+        print("Starting main event loop to keep window alive...")
+        
+        # Keep the process alive by running the main event loop
+        try:
+            # Use the ternary window's mainloop since it's the main window
+            ternary_window.window.mainloop()
+        except Exception as e:
+            print(f"Window closed or error occurred: {e}")
+            root.destroy()
+        
+    except Exception as e:
+        print(f"ERROR: Failed to start Ternary Viewer: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "Ternary Viewer Launch Error",
+                f"Failed to start Ternary Viewer:\n\n{str(e)}\n\n"
+                f"Please check the console for detailed error information."
+            )
+            root.destroy()
+        except:
+            print(f"CRITICAL ERROR: {e}")
+
+
 def launch_plot3d_only():
     """Launch Plot_3D only mode."""
     try:
@@ -109,6 +181,11 @@ def main():
         if selected_mode == "full":
             launch_full_stampz()
             # Force complete process termination when main app closes
+            sys.exit(0)
+            
+        elif selected_mode == "ternary":
+            launch_ternary_viewer()
+            # Force complete process termination when Ternary Viewer closes
             sys.exit(0)
             
         elif selected_mode == "plot3d":
