@@ -88,21 +88,12 @@ class TernaryPlotWindow:
         self.clusters = {}
         self.cluster_colors = self.cluster_manager.cluster_colors
         
-        self.show_hull = tk.BooleanVar(value=True)
+        self.show_hull = tk.BooleanVar(value=False)  # Start unchecked
         self.show_clusters = tk.BooleanVar(value=False) 
+        self.show_spheres = tk.BooleanVar(value=False)  # Initialize spheres variable
         self.n_clusters = tk.IntVar(value=3)
         
-        # Add variable tracing to detect checkbox changes with simple test functions
-        def hull_trace_callback(*args):
-            print(f"🔧 TRACE: Hull variable changed to {self.show_hull.get()}")
-            self._on_hull_toggle()
-            
-        def clusters_trace_callback(*args):
-            print(f"🔧 TRACE: Clusters variable changed to {self.show_clusters.get()}")
-            self._on_clusters_toggle()
-            
-        self.show_hull.trace_add('write', hull_trace_callback)
-        self.show_clusters.trace_add('write', clusters_trace_callback)
+        # Use command callbacks instead of trace callbacks for better macOS compatibility
         
         # Track external file for integration
         self.external_file_path = None
@@ -170,7 +161,7 @@ class TernaryPlotWindow:
         else:
             self.window = tk.Tk()
         
-        self.window.title(f"RGB Ternary Analysis - {self.sample_set_name}")
+        self.window.title("RGB Ternary Analysis")
         self.window.geometry("1200x800")
         
         # macOS-specific window handling
@@ -209,148 +200,300 @@ class TernaryPlotWindow:
             logger.exception(f"Error in orphaned mainloop: {e}")
     
     def _setup_ui(self):
-        """Setup the user interface with Plot_3D-style layout."""
-        # Main container
+        """Setup the user interface with modern Plot_3D-style layout."""
+        # Main container with grid layout
         main_frame = ttk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Top toolbar
-        self._create_toolbar(main_frame)
+        # Configure grid weights for responsive layout
+        main_frame.grid_columnconfigure(0, weight=2)  # Plot area gets ~40% width
+        main_frame.grid_columnconfigure(1, weight=3)  # Control panel gets ~60% width
+        main_frame.grid_rowconfigure(0, weight=1)     # Content area expands
+        main_frame.grid_rowconfigure(1, weight=0)     # Status bar fixed height
         
-        # Plot area
-        plot_frame = ttk.Frame(main_frame)
-        plot_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        # === LEFT SIDE: Plot Area ===
+        plot_frame = ttk.Frame(main_frame, relief='solid', borderwidth=1)
+        plot_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 5), pady=(0, 5))
+        plot_frame.grid_columnconfigure(0, weight=1)
+        plot_frame.grid_rowconfigure(1, weight=1)  # Canvas expands
         
-        # Create matplotlib figure with interactive capabilities
-        self.fig, self.ax = plt.subplots(figsize=(10, 8))
-        self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
+        # Plot title and info
+        self.title_frame = ttk.Frame(plot_frame)
+        self.title_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=(5, 2))
         
-        # Enhanced navigation toolbar with zoom/pan for dense data points (pack FIRST)
-        self.nav_toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
-        self.nav_toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+        self.plot_title_label = ttk.Label(self.title_frame, text=f"RGB Ternary Analysis: {self.sample_set_name}", 
+                 font=('Arial', 12, 'bold'))
+        self.plot_title_label.pack(side=tk.LEFT)
         
-        # Update toolbar to ensure it's functional
-        self.nav_toolbar.update()
-        
-        # Add toolbar info
-        nav_info = ttk.Label(plot_frame, text="💡 Use zoom/pan toolbar above when points overlap | Click points to select/highlight", 
-                            font=('Arial', 9, 'italic'), foreground='gray')
-        nav_info.pack(side=tk.TOP, pady=(0, 2))
-        
-        # Pack canvas AFTER toolbar so toolbar appears above
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
-        # Add click handler for point selection and identification
-        self.selected_points = set()
-        self.point_labels = []  # Store active point labels for cleanup
-        self.canvas.mpl_connect('button_press_event', self._on_plot_click)
-        
-        # Status bar
-        self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN)
-        self.status_bar.pack(fill=tk.X, pady=(2, 0))
-    
-    def _create_toolbar(self, parent):
-        """Create toolbar with 2 rows for better space management."""
-        self.toolbar = ttk.Frame(parent)
-        self.toolbar.pack(fill=tk.X, pady=(0, 5))
-        
-        # === TOP ROW: Data Controls ===
-        top_row = ttk.Frame(self.toolbar)
-        top_row.pack(fill=tk.X, pady=(0, 2))
-        
-        # Left side - Sample info and data controls
-        left_frame = ttk.Frame(top_row)
-        left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        ttk.Label(left_frame, text="Sample Set:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Label(left_frame, text=self.sample_set_name, font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Database Format Indicator
-        self.format_frame = ttk.Frame(left_frame)
-        self.format_frame.pack(side=tk.LEFT, padx=(0, 15))
+        # Format indicator in title area
+        self.format_frame = ttk.Frame(self.title_frame)
+        self.format_frame.pack(side=tk.RIGHT)
         ttk.Label(self.format_frame, text="Format:", font=('Arial', 9)).pack(side=tk.LEFT, padx=(0, 2))
         self.format_indicator = ttk.Label(self.format_frame, text="UNKNOWN", font=('Arial', 9, 'bold'), 
                                         foreground='gray', background='lightgray', relief='sunken', width=12)
         self.format_indicator.pack(side=tk.LEFT)
         
-        ttk.Button(left_frame, text="Load Database", command=self._load_data_dialog).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_frame, text="Load External File", command=self._load_external_file).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_frame, text="↻ Reload Database", command=self._reload_current_database).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(left_frame, text="Refresh Plot", command=self._refresh_plot_only).pack(side=tk.LEFT, padx=(0, 5))
+        # Canvas container with navigation toolbar
+        canvas_container = ttk.Frame(plot_frame)
+        canvas_container.grid(row=1, column=0, sticky='nsew', padx=5, pady=(0, 5))
+        canvas_container.grid_columnconfigure(0, weight=1)
+        canvas_container.grid_rowconfigure(1, weight=1)  # Canvas expands
         
-        # Datasheet sync button (initially hidden)
-        self.refresh_from_datasheet_btn = ttk.Button(left_frame, text="↻ Sync from Datasheet", command=self._refresh_from_datasheet)
-        # Pack it but make it initially disabled until datasheet is opened
-        self.refresh_from_datasheet_btn.pack(side=tk.LEFT, padx=(5, 15))
-        self.refresh_from_datasheet_btn.config(state='disabled')
+        # Create matplotlib figure
+        self.fig, self.ax = plt.subplots(figsize=(8, 8))
+        self.canvas = FigureCanvasTkAgg(self.fig, canvas_container)
         
-        # Right side - Save/Export controls
-        right_frame_top = ttk.Frame(top_row)
-        right_frame_top.pack(side=tk.RIGHT)
+        # Navigation toolbar
+        self.nav_toolbar = NavigationToolbar2Tk(self.canvas, canvas_container)
+        self.nav_toolbar.grid(row=0, column=0, sticky='ew', pady=(0, 2))
+        self.nav_toolbar.update()
         
-        ttk.Button(right_frame_top, text="💾 Save As Database", command=self._save_as_database).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame_top, text="📊 Open Datasheet", command=self._open_plot3d).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(right_frame_top, text="🔬 Spectral Analysis", command=self._open_spectral_analyzer).pack(side=tk.LEFT, padx=(0, 5))
+        # Canvas
+        self.canvas.get_tk_widget().grid(row=1, column=0, sticky='nsew')
         
-        # === BOTTOM ROW: Visualization Controls ===
-        bottom_row = ttk.Frame(self.toolbar)
-        bottom_row.pack(fill=tk.X)
+        # Add click handler for point selection
+        self.selected_points = set()
+        self.point_labels = []
+        self.canvas.mpl_connect('button_press_event', self._on_plot_click)
         
-        # Left side - Visualization options
-        viz_frame = ttk.Frame(bottom_row)
-        viz_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # === RIGHT SIDE: Control Panel ===
+        self._create_control_panel(main_frame)
         
-        # Convex Hull checkbox with manual click detection
-        hull_cb = ttk.Checkbutton(viz_frame, text="Convex Hull", variable=self.show_hull)
-        hull_cb.pack(side=tk.LEFT, padx=(0, 10))
-        hull_cb.bind('<ButtonRelease-1>', lambda e: self._manual_hull_toggle())
-        hull_cb.bind('<Return>', lambda e: self._manual_hull_toggle())
-        hull_cb.bind('<space>', lambda e: self._manual_hull_toggle())
+        # === BOTTOM: Status Bar ===
+        self.status_bar = ttk.Label(main_frame, text="Ready", relief=tk.SUNKEN, font=('Arial', 9))
+        self.status_bar.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(5, 0))
+    
+    def _create_control_panel(self, parent):
+        """Create modern, right-side control panel with organized sections."""
+        # Control panel frame with scroll support and minimum width
+        control_outer_frame = ttk.Frame(parent, relief='groove', borderwidth=2)
+        control_outer_frame.grid(row=0, column=1, sticky='nsew', ipadx=15, ipady=8)
+        control_outer_frame.grid_columnconfigure(0, weight=1, minsize=450)  # Minimum 450px width
+        control_outer_frame.grid_rowconfigure(0, weight=1)
         
-        # K-means Clusters checkbox with manual click detection
-        clusters_cb = ttk.Checkbutton(viz_frame, text="K-means Clusters", variable=self.show_clusters)
-        clusters_cb.pack(side=tk.LEFT, padx=(0, 5))
-        clusters_cb.bind('<ButtonRelease-1>', lambda e: self._manual_clusters_toggle())
-        clusters_cb.bind('<Return>', lambda e: self._manual_clusters_toggle())
-        clusters_cb.bind('<space>', lambda e: self._manual_clusters_toggle())
+        # Create a canvas for scrolling
+        control_canvas = tk.Canvas(control_outer_frame)
+        control_canvas.grid(row=0, column=0, sticky='nsew')
         
-        ttk.Label(viz_frame, text="Clusters:").pack(side=tk.LEFT, padx=(0, 2))
-        cluster_spin = ttk.Spinbox(viz_frame, from_=2, to=8, width=3, textvariable=self.n_clusters,
-                                  command=self._update_clusters)
-        cluster_spin.pack(side=tk.LEFT, padx=(0, 5))
+        # Scrollbar for canvas
+        scrollbar = ttk.Scrollbar(control_outer_frame, orient="vertical", command=control_canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        control_canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Store reference for additional event binding
+        # Create inner frame for controls
+        self.control_frame = ttk.Frame(control_canvas)
+        control_window = control_canvas.create_window((0, 0), window=self.control_frame, anchor='nw')
+        
+        # Configure inner frame
+        self.control_frame.grid_columnconfigure(0, weight=1)
+        
+        # Update scroll region when size changes
+        def update_scrollregion(event):
+            control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+            # Also update canvas width to match frame width
+            control_canvas.itemconfig(control_window, width=event.width)
+        
+        self.control_frame.bind('<Configure>', update_scrollregion)
+        
+        # Control Panel Title
+        title_lbl = ttk.Label(self.control_frame, text="Controls", 
+                            font=('Arial', 12, 'bold'), anchor='center')
+        title_lbl.grid(row=0, column=0, pady=(10, 5), sticky='ew')
+        
+        # Add sections
+        row_idx = 1
+        
+        # SECTION 1: DATA CONTROLS
+        row_idx = self._create_data_controls_section(row_idx)
+        
+        # SECTION 2: VISUALIZATION OPTIONS
+        row_idx = self._create_visualization_section(row_idx)
+        
+        # SECTION 3: K-MEANS CLUSTERING
+        row_idx = self._create_clustering_section(row_idx)
+        
+        # SECTION 4: EXPORT OPTIONS
+        row_idx = self._create_export_section(row_idx)
+        
+        # SECTION 5: APPLICATION CONTROL
+        row_idx = self._create_app_control_section(row_idx)
+        
+        # Add empty space at the bottom
+        spacer = ttk.Frame(self.control_frame)
+        spacer.grid(row=row_idx, column=0, sticky='ew', pady=10)
+    
+    def _create_section_header(self, title, row):
+        """Create a section header with title and separator."""
+        # Section Frame
+        section_frame = ttk.Frame(self.control_frame, relief='flat')
+        section_frame.grid(row=row, column=0, sticky='ew', padx=10, pady=(15, 0))
+        section_frame.grid_columnconfigure(0, weight=1)
+        
+        # Section Title
+        header = ttk.Label(section_frame, text=title, font=('Arial', 10, 'bold'), foreground='#2a6eb2')
+        header.grid(row=0, column=0, sticky='w')
+        
+        # Separator
+        sep = ttk.Separator(self.control_frame, orient='horizontal')
+        sep.grid(row=row+1, column=0, sticky='ew', padx=10, pady=(2, 5))
+        
+        return section_frame, row+2
+    
+    def _create_data_controls_section(self, start_row):
+        """Create data controls section."""
+        section_frame, row_idx = self._create_section_header("Data Controls", start_row)
+        
+        # Container for database info
+        info_frame = ttk.Frame(self.control_frame)
+        info_frame.grid(row=row_idx, column=0, sticky='ew', padx=20)
+        info_frame.grid_columnconfigure(0, weight=1)
+        row_idx += 1
+        
+        # Sample set info
+        sample_frame = ttk.Frame(info_frame)
+        sample_frame.grid(row=0, column=0, sticky='ew', pady=2)
+        ttk.Label(sample_frame, text="Sample Set:", width=10).pack(side=tk.LEFT)
+        ttk.Label(sample_frame, text=self.sample_set_name, font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+        
+        # Load/Reload buttons in grid layout
+        buttons_frame = ttk.Frame(self.control_frame)
+        buttons_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=5)
+        buttons_frame.grid_columnconfigure(0, weight=1)
+        buttons_frame.grid_columnconfigure(1, weight=1)
+        row_idx += 1
+        
+        ttk.Button(buttons_frame, text="Load DB", command=self._load_data_dialog).grid(row=0, column=0, sticky='ew', padx=2, pady=4, ipadx=25)
+        ttk.Button(buttons_frame, text="Load File", command=self._load_external_file).grid(row=0, column=1, sticky='ew', padx=2, pady=4, ipadx=25)
+        ttk.Button(buttons_frame, text="↻ Reload", command=self._reload_current_database).grid(row=1, column=0, sticky='ew', padx=2, pady=4, ipadx=25)
+        ttk.Button(buttons_frame, text="Refresh", command=self._refresh_plot_only).grid(row=1, column=1, sticky='ew', padx=2, pady=4, ipadx=25)
+        
+        # Datasheet sync button
+        self.refresh_from_datasheet_btn = ttk.Button(self.control_frame, text="↻ Sync from Datasheet", 
+                                                  command=self._refresh_from_datasheet)
+        self.refresh_from_datasheet_btn.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=4, ipadx=15)
+        self.refresh_from_datasheet_btn.config(state='disabled')  # Initially disabled
+        row_idx += 1
+        
+        # Integration buttons
+        integration_frame = ttk.Frame(self.control_frame)
+        integration_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=5)
+        integration_frame.grid_columnconfigure(0, weight=1)
+        integration_frame.grid_columnconfigure(1, weight=1)
+        row_idx += 1
+        
+        ttk.Button(integration_frame, text="📊 Open Datasheet", 
+                  command=self._open_plot3d).grid(row=0, column=0, columnspan=2, sticky='ew', padx=4, pady=4, ipadx=15)
+        ttk.Button(integration_frame, text="🔬 Spectral Analysis", 
+                  command=self._open_spectral_analyzer).grid(row=1, column=0, columnspan=2, sticky='ew', padx=4, pady=4, ipadx=15)
+        
+        return row_idx
+    
+    def _create_visualization_section(self, start_row):
+        """Create visualization options section."""
+        section_frame, row_idx = self._create_section_header("Visualization Options", start_row)
+        
+        # Hull display
+        hull_frame = ttk.Frame(self.control_frame)
+        hull_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=3)
+        row_idx += 1
+        
+        # Convex Hull checkbox with improved styling
+        hull_cb = ttk.Checkbutton(hull_frame, text="Show Convex Hull", 
+                                 variable=self.show_hull, 
+                                 command=lambda: self._on_hull_toggle())
+        hull_cb.pack(fill=tk.X, padx=5)
+        
+        # Spheres checkbox
+        spheres_frame = ttk.Frame(self.control_frame)
+        spheres_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=3)
+        row_idx += 1
+        
+        spheres_cb = ttk.Checkbutton(spheres_frame, text="Use Sphere Visualization", 
+                                    variable=self.show_spheres, 
+                                    command=lambda: self._on_spheres_toggle())
+        spheres_cb.pack(fill=tk.X, padx=5)
+        
+        return row_idx
+    
+    def _create_clustering_section(self, start_row):
+        """Create K-means clustering section."""
+        section_frame, row_idx = self._create_section_header("K-means Clustering", start_row)
+        
+        # Clusters control
+        cluster_frame = ttk.Frame(self.control_frame)
+        cluster_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=3)
+        cluster_frame.grid_columnconfigure(1, weight=1)
+        row_idx += 1
+        
+        # K-means activation checkbox
+        clusters_cb = ttk.Checkbutton(cluster_frame, text="Enable K-means Clusters", 
+                                     variable=self.show_clusters, 
+                                     command=lambda: self._on_clusters_toggle())
+        clusters_cb.grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
+        
+        # Cluster count control
+        ttk.Label(cluster_frame, text="Number of Clusters:").grid(row=1, column=0, sticky='w', padx=5, pady=(5, 0))
+        
+        # Spinbox with modern styling
+        spinbox_frame = ttk.Frame(cluster_frame)
+        spinbox_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5, pady=(2, 5))
+        
+        cluster_spin = ttk.Spinbox(spinbox_frame, from_=2, to=8, width=3, textvariable=self.n_clusters,
+                                   command=self._update_clusters)
+        cluster_spin.pack(side=tk.LEFT)
         self.cluster_spin = cluster_spin
-        
-        # Ensure the spinbox shows the initial value
         cluster_spin.set(self.n_clusters.get())
         
-        # Add additional event bindings for better cross-platform compatibility
+        # Add event bindings
         cluster_spin.bind('<KeyRelease>', lambda e: self._on_spinbox_change())
         cluster_spin.bind('<Button-1>', lambda e: self.window.after(100, self._on_spinbox_change))
         cluster_spin.bind('<ButtonRelease-1>', lambda e: self.window.after(100, self._on_spinbox_change))
-        self.n_clusters.trace('w', lambda *args: self._on_spinbox_change())
         
-        # Add sphere visualization option with debugging
-        self.show_spheres = tk.BooleanVar()
-        # Add tracing for spheres variable with test function
-        def spheres_trace_callback(*args):
-            print(f"🔧 TRACE: Spheres variable changed to {self.show_spheres.get()}")
-            self._on_spheres_toggle()
-            
-        self.show_spheres.trace_add('write', spheres_trace_callback)
-        spheres_cb = ttk.Checkbutton(viz_frame, text="Spheres", variable=self.show_spheres)
-        spheres_cb.pack(side=tk.LEFT, padx=(5, 15))
-        spheres_cb.bind('<ButtonRelease-1>', lambda e: self._manual_spheres_toggle())
-        spheres_cb.bind('<Return>', lambda e: self._manual_spheres_toggle())
-        spheres_cb.bind('<space>', lambda e: self._manual_spheres_toggle())
+        # NEW: Manual Save Clusters button
+        save_clusters_btn = ttk.Button(cluster_frame, text="💾 Save Clusters to Database", 
+                                      command=self._save_clusters_to_database)
+        save_clusters_btn.grid(row=3, column=0, columnspan=2, sticky='ew', padx=8, pady=(8, 0), ipadx=15)
         
-        # Right side - Plot export controls
-        export_frame = ttk.Frame(bottom_row)
-        export_frame.pack(side=tk.RIGHT)
+        return row_idx
+    
+    def _create_export_section(self, start_row):
+        """Create export options section."""
+        section_frame, row_idx = self._create_section_header("Export Options", start_row)
         
-        ttk.Button(export_frame, text="📸 Save Plot PNG", command=self._save_plot).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(export_frame, text="📤 Export Data", command=self._export_data).pack(side=tk.LEFT, padx=(0, 5))
+        # Export buttons
+        export_frame = ttk.Frame(self.control_frame)
+        export_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=5)
+        export_frame.grid_columnconfigure(0, weight=1)
+        row_idx += 1
+        
+        ttk.Button(export_frame, text="💾 Save As Database", 
+                  command=self._save_as_database).grid(row=0, column=0, sticky='ew', pady=4, ipadx=15)
+        ttk.Button(export_frame, text="📸 Save Plot as PNG", 
+                  command=self._save_plot).grid(row=1, column=0, sticky='ew', pady=4, ipadx=15)
+        ttk.Button(export_frame, text="📤 Export Data", 
+                  command=self._export_data).grid(row=2, column=0, sticky='ew', pady=4, ipadx=15)
+        
+        return row_idx
+    
+    def _create_app_control_section(self, start_row):
+        """Create application control section with exit buttons."""
+        section_frame, row_idx = self._create_section_header("Application Control", start_row)
+        
+        # Exit buttons
+        exit_frame = ttk.Frame(self.control_frame)
+        exit_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=5)
+        exit_frame.grid_columnconfigure(0, weight=1)
+        row_idx += 1
+        
+        ttk.Button(exit_frame, text="← Return to Launcher", 
+                  command=self._exit_ternary).grid(row=0, column=0, sticky='ew', pady=4, ipadx=15)
+        
+        # Only show "Exit Application" if running standalone (no parent)
+        if not self.parent:
+            ttk.Button(exit_frame, text="🚪 Exit Application", 
+                      command=self._exit_application).grid(row=1, column=0, sticky='ew', pady=4, ipadx=15)
+        
+        return row_idx
     
     def _load_initial_data(self):
         """Load initial data if color_points not provided."""
@@ -447,6 +590,9 @@ class TernaryPlotWindow:
         
         try:
             logger.info("🔄 REFRESH DEBUG: Starting datasheet sync from ternary plot window")
+            print(f"\n=== REFRESH FROM DATASHEET DEBUG ===")
+            print(f"BEFORE sync: self.color_points length = {len(self.color_points) if self.color_points else 0}")
+            print(f"=====================================\n")
             self._update_status("Syncing from datasheet...")
             
             # Use datasheet manager to sync data
@@ -1037,18 +1183,80 @@ class TernaryPlotWindow:
     
     def _on_hull_toggle(self):
         """Handle convex hull checkbox toggle with debugging."""
-        print(f"DEBUG: Convex Hull checkbox clicked! New state: {self.show_hull.get()}")
+        # Manually toggle the state since macOS checkboxes aren't auto-toggling
+        current_state = self.show_hull.get()
+        new_state = not current_state
+        self.show_hull.set(new_state)
+        print(f"DEBUG: Convex Hull checkbox clicked! Changed from {current_state} to {new_state}")
         self._refresh_plot()
     
     def _on_clusters_toggle(self):
         """Handle K-means clusters checkbox toggle with debugging."""
-        print(f"DEBUG: K-means Clusters checkbox clicked! New state: {self.show_clusters.get()}")
+        # Manually toggle the state since macOS checkboxes aren't auto-toggling
+        current_state = self.show_clusters.get()
+        new_state = not current_state
+        self.show_clusters.set(new_state)
+        print(f"DEBUG: K-means Clusters checkbox clicked! Changed from {current_state} to {new_state}")
         self._toggle_clusters()
     
     def _on_spheres_toggle(self):
         """Handle spheres checkbox toggle with debugging."""
-        print(f"DEBUG: Spheres checkbox clicked! New state: {self.show_spheres.get()}")
+        # Manually toggle the state since macOS checkboxes aren't auto-toggling
+        current_state = self.show_spheres.get()
+        new_state = not current_state
+        self.show_spheres.set(new_state)
+        print(f"DEBUG: Spheres checkbox clicked! Changed from {current_state} to {new_state}")
         self._toggle_spheres()
+    
+    def _save_clusters_to_database(self):
+        """Manually save cluster assignments to database - like Plot_3D approach."""
+        try:
+            if not hasattr(self, 'clusters') or not self.clusters:
+                messagebox.showwarning("No Clusters", "No clusters found to save.\n\nPlease enable K-means clustering first.")
+                return
+                
+            # Count total assignments
+            total_assignments = sum(len(cluster_points) for cluster_points in self.clusters.values())
+            
+            # Confirm with user
+            if not messagebox.askyesno("Save Clusters", 
+                                     f"Save {len(self.clusters)} clusters with {total_assignments} point assignments to database?\n\n"
+                                     f"This will update the database with cluster assignments and centroid data."):
+                return
+                
+            # Save cluster assignments
+            saved_count = 0
+            for cluster_id, cluster_points in self.clusters.items():
+                for point in cluster_points:
+                    self._save_cluster_assignment(point.id, int(cluster_id))
+                    saved_count += 1
+            
+            # Also save using cluster manager
+            if hasattr(self, 'cluster_manager'):
+                try:
+                    self.cluster_manager.save_cluster_assignments_to_db(
+                        database_manager=None,  # Will create its own connection
+                        sample_set_name=self.sample_set_name
+                    )
+                except Exception as cluster_save_error:
+                    logger.warning(f"Cluster manager save failed: {cluster_save_error}")
+            
+            # Update status and show success
+            status_msg = f"Saved {len(self.clusters)} clusters ({saved_count} assignments) to database"
+            self._update_status(status_msg)
+            
+            messagebox.showinfo("Clusters Saved", 
+                              f"Successfully saved cluster data:\n\n"
+                              f"• {len(self.clusters)} clusters\n"
+                              f"• {saved_count} point assignments\n"
+                              f"• Centroid coordinates\n\n"
+                              f"Data has been written to the database.")
+            
+            logger.info(f"Manual cluster save completed: {len(self.clusters)} clusters, {saved_count} assignments")
+            
+        except Exception as e:
+            logger.exception(f"Failed to save clusters: {e}")
+            messagebox.showerror("Save Failed", f"Failed to save clusters to database:\n\n{e}")
     
     def _manual_hull_toggle(self):
         """Manually handle convex hull checkbox click with delay."""
@@ -1057,11 +1265,9 @@ class TernaryPlotWindow:
     
     def _delayed_hull_toggle(self):
         """Execute hull toggle after checkbox state update."""
-        # Manually flip the state since tkinter isn't doing it properly
+        # Trust tkinter's checkbox state (no manual flipping needed)
         current_state = self.show_hull.get()
-        new_state = not current_state
-        self.show_hull.set(new_state)
-        print(f"🔧 MANUAL: Hull checkbox clicked! Changed from {current_state} to {new_state}")
+        print(f"🔧 MANUAL: Hull checkbox is now {current_state}")
         print(f"🔧 MANUAL: Calling _refresh_plot() for hull toggle...")
         self._refresh_plot()
         print(f"🔧 MANUAL: Hull toggle refresh completed")
@@ -1073,11 +1279,9 @@ class TernaryPlotWindow:
     
     def _delayed_clusters_toggle(self):
         """Execute clusters toggle after checkbox state update."""
-        # Manually flip the state since tkinter isn't doing it properly
+        # Trust tkinter's checkbox state (no manual flipping needed)
         current_state = self.show_clusters.get()
-        new_state = not current_state
-        self.show_clusters.set(new_state)
-        print(f"🔧 MANUAL: Clusters checkbox clicked! Changed from {current_state} to {new_state}")
+        print(f"🔧 MANUAL: Clusters checkbox is now {current_state}")
         print(f"🔧 MANUAL: Calling _toggle_clusters() for clusters toggle...")
         self._toggle_clusters()
         print(f"🔧 MANUAL: Clusters toggle completed")
@@ -1089,11 +1293,9 @@ class TernaryPlotWindow:
     
     def _delayed_spheres_toggle(self):
         """Execute spheres toggle after checkbox state update."""
-        # Manually flip the state since tkinter isn't doing it properly
+        # Trust tkinter's checkbox state (no manual flipping needed)
         current_state = self.show_spheres.get()
-        new_state = not current_state
-        self.show_spheres.set(new_state)
-        print(f"🔧 MANUAL: Spheres checkbox clicked! Changed from {current_state} to {new_state}")
+        print(f"🔧 MANUAL: Spheres checkbox is now {current_state}")
         self._toggle_spheres()
     
     def _rgb_to_ternary_coords(self, rgb):
@@ -1153,7 +1355,9 @@ class TernaryPlotWindow:
                     self.show_spheres.set(False)
                     self.n_clusters.set(3)
                     
-                    self.window.title(f"RGB Ternary Analysis - {selected_set}")
+                    # Update plot title (window title stays simple)
+                    self._update_plot_title(selected_set)
+                    
                     self._refresh_plot()
                     self._update_status(f"Loaded {selected_set} ({db_format} format) - {len(self.color_points)} points")
                     print(f"DEBUG: Database loaded: {selected_set}, {len(self.color_points)} points, format: {db_format}")
@@ -1638,6 +1842,27 @@ class TernaryPlotWindow:
     def _open_plot3d(self):
         """Open realtime datasheet with current data using datasheet manager."""
         try:
+            # DEBUG: Check current state
+            print(f"\n=== IMMEDIATE DEBUG CHECK ===")
+            print(f"self.color_points type: {type(self.color_points)}")
+            print(f"self.color_points length: {len(self.color_points) if self.color_points else 0}")
+            print(f"self.color_points is None: {self.color_points is None}")
+            print(f"self.color_points is empty list: {self.color_points == []}")
+            if self.color_points and len(self.color_points) > 0:
+                print(f"First color point ID: {self.color_points[0].id}")
+            print(f"================================\n")
+            
+            logger.info(f"📊 DATASHEET DEBUG: Opening datasheet with {len(self.color_points) if self.color_points else 0} color points")
+            logger.info(f"📊 DATASHEET DEBUG: Sample set name: {self.sample_set_name}")
+            logger.info(f"📊 DATASHEET DEBUG: Has clusters: {hasattr(self, 'clusters') and bool(self.clusters)}")
+            
+            # Verify we have color points to share
+            if not self.color_points:
+                messagebox.showwarning("No Data", 
+                                     "No color data available to open in datasheet.\n\n"
+                                     "Please load a database or external file first using the \"Load Database\" button.")
+                return
+            
             # Ensure clusters are computed if K-means is enabled
             if self.show_clusters.get() and self.cluster_manager.has_sklearn():
                 if not hasattr(self, 'clusters') or not self.clusters:
@@ -1647,6 +1872,7 @@ class TernaryPlotWindow:
                     logger.info(f"K-means enabled, found {len(self.clusters)} existing clusters")
             
             # Use datasheet manager to open datasheet
+            logger.info(f"📊 DATASHEET DEBUG: Calling datasheet manager with {len(self.color_points)} points")
             datasheet = self.datasheet_manager.open_realtime_datasheet(
                 color_points=self.color_points,
                 clusters=self.clusters if self.clusters else None,
@@ -2361,6 +2587,11 @@ class TernaryPlotWindow:
         tooltip = tooltip_text.get(db_format, 'Format detection status')
         self.format_indicator.config(text=f"{style['text']}")  # Keep it simple for now
     
+    def _update_plot_title(self, sample_set_name):
+        """Update the plot title label to show current sample set."""
+        if hasattr(self, 'plot_title_label'):
+            self.plot_title_label.config(text=f"RGB Ternary Analysis: {sample_set_name}")
+    
     def _on_plot_click(self, event):
         """Handle clicks on the plot for point identification and selection."""
         if event.inaxes != self.ax or not self.color_points:
@@ -2566,8 +2797,157 @@ class TernaryPlotWindow:
             sample_set_name=self.sample_set_name
         )
     
-    def _on_close(self):
-        """Handle window close."""
+    def _exit_ternary(self):
+        """Exit ternary plot window and return to launcher."""
+        try:
+            # Ask for confirmation
+            if messagebox.askyesno("Close Ternary Window", 
+                                 "Close the Ternary Plot window?\n\n"
+                                 "You will return to the StampZ-III launcher where you can\n"
+                                 "choose a different analysis mode or exit completely.\n\n"
+                                 "Any unsaved cluster data will be lost unless you've used the \"Save Clusters\" button."):
+                
+                # Clean up current window (don't auto-return to launcher)
+                self._on_close(return_to_launcher=False)
+                
+                # Return to the main launcher
+                self._return_to_launcher()
+                
+                logger.info("User requested ternary window closure, returning to launcher")
+        except Exception as e:
+            logger.exception(f"Error during ternary window exit: {e}")
+            # Force close if there's an error but still try to return to launcher
+            try:
+                self._on_close(return_to_launcher=False)
+                self._return_to_launcher()
+            except:
+                # If everything fails, just exit
+                import sys
+                sys.exit(0)
+    
+    def _return_to_launcher(self):
+        """Return to the main StampZ-III launcher with crash protection."""
+        try:
+            logger.info("Attempting to return to launcher...")
+            
+            # Add small delay to ensure window cleanup is complete
+            import time
+            time.sleep(0.1)
+            
+            # Import and show the launcher
+            from launch_selector import LaunchSelector
+            
+            # Create and show the launcher
+            selector = LaunchSelector()
+            selected_mode = selector.show()
+            
+            # Clean up the selector window safely
+            try:
+                if hasattr(selector, 'root') and selector.root:
+                    # Check if window still exists before trying to destroy it
+                    if selector.root.winfo_exists():
+                        selector.root.quit()
+                        selector.root.destroy()
+            except Exception as cleanup_error:
+                logger.warning(f"Selector cleanup warning: {cleanup_error}")
+            
+            # Handle the selected mode with protection
+            try:
+                if selected_mode == "full":
+                    logger.info("Launching full StampZ application")
+                    from app import StampZApp
+                    import tkinter as tk
+                    
+                    root = tk.Tk()
+                    app = StampZApp(root)
+                    root.mainloop()
+                    
+                elif selected_mode == "ternary":
+                    logger.info("Relaunching ternary viewer")
+                    from main import launch_ternary_viewer
+                    launch_ternary_viewer()
+                    
+                elif selected_mode == "plot3d":
+                    logger.info("Launching Plot_3D mode")
+                    from plot3d.standalone_plot3d import main as plot3d_main
+                    plot3d_main()
+                    
+                else:
+                    # User cancelled or chose to exit
+                    logger.info("User cancelled launcher, exiting application")
+                    import sys
+                    sys.exit(0)
+                    
+            except Exception as launch_error:
+                logger.exception(f"Error launching selected mode '{selected_mode}': {launch_error}")
+                # Still exit cleanly if launch fails
+                import sys
+                sys.exit(1)
+                
+        except Exception as e:
+            logger.exception(f"Critical error in _return_to_launcher: {e}")
+            # If anything fails, exit gracefully
+            try:
+                import sys
+                logger.info("Performing emergency exit due to launcher failure")
+                sys.exit(1)
+            except:
+                # Last resort
+                import os
+                os._exit(1)
+    
+    def _exit_application(self):
+        """Exit entire application - only available in standalone mode."""
+        try:
+            # Double confirmation for full application exit
+            if messagebox.askyesno("Exit Application", 
+                                 "Exit the entire StampZ-III application?\n\n"
+                                 "This will close all windows and stop all background processes.\n"
+                                 "Make sure you've saved any important work."):
+                
+                # Clean up this window first
+                try:
+                    if self.datasheet_manager.is_datasheet_linked():
+                        self.datasheet_manager.close_datasheet()
+                        logger.info("Cleaned up datasheet references before application exit")
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during cleanup before exit: {cleanup_error}")
+                
+                # Close any other toplevel windows
+                try:
+                    for widget in self.window.winfo_children():
+                        if isinstance(widget, tk.Toplevel):
+                            widget.destroy()
+                except Exception as window_cleanup_error:
+                    logger.warning(f"Error closing child windows: {window_cleanup_error}")
+                
+                # Forcefully quit the entire application
+                logger.info("User requested full application exit from standalone ternary window")
+                self.window.quit()  # Stop the mainloop
+                self.window.destroy()  # Destroy the window
+                
+                # Force exit if running standalone
+                try:
+                    import sys
+                    sys.exit(0)
+                except:
+                    pass
+        
+        except Exception as e:
+            logger.exception(f"Error during application exit: {e}")
+            # Force exit if there's an error
+            try:
+                import sys
+                sys.exit(1)
+            except:
+                pass
+    
+    def _on_close(self, return_to_launcher=True):
+        """Handle window close.
+        
+        Args:
+            return_to_launcher: If True, return to launcher after closing. If False, just destroy window.
+        """
         try:
             # Clean up datasheet references
             if self.datasheet_manager.is_datasheet_linked():
@@ -2577,7 +2957,34 @@ class TernaryPlotWindow:
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
         
-        self.window.destroy()
+        # Destroy the window safely
+        try:
+            if hasattr(self, 'window') and self.window:
+                # Check if window still exists before destroying
+                if self.window.winfo_exists():
+                    self.window.destroy()
+                    logger.info("Window destroyed successfully")
+        except Exception as destroy_error:
+            logger.warning(f"Window destruction warning: {destroy_error}")
+        
+        # Return to launcher if requested (and not already in a return-to-launcher flow)
+        if return_to_launcher and not hasattr(self, '_returning_to_launcher'):
+            self._returning_to_launcher = True  # Prevent recursion
+            try:
+                logger.info("Window closed via X button, returning to launcher")
+                # Small delay to ensure window cleanup is complete
+                import time
+                time.sleep(0.05)
+                self._return_to_launcher()
+            except Exception as e:
+                logger.exception(f"Failed to return to launcher from _on_close: {e}")
+                # If launcher fails, just exit
+                try:
+                    import sys
+                    sys.exit(0)
+                except:
+                    import os
+                    os._exit(0)
 
 
 def demo_ternary_window():
