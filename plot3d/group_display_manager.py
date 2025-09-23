@@ -26,7 +26,7 @@ class GroupDisplayManager:
         
         # State tracking
         self.visible_indices: Set[int] = set()  # Set of visible DataFrame indices
-        self.selection_mode = tk.StringVar(value='row_range')  # 'cluster' or 'row_range'
+        self.selection_mode = tk.StringVar(value='cluster')  # Only cluster mode now
         self.visibility_enabled = tk.BooleanVar(value=False)
         self.cluster_selection = tk.StringVar(value='')  # For cluster selection dropdown
         
@@ -40,84 +40,69 @@ class GroupDisplayManager:
         # Initialize row mapping
         self.update_row_mapping()
         
+        # Set initial UI state
+        self._initialize_ui_state()
+        
     def create_controls(self):
         """Create the group display control panel"""
         # Main frame with bold title and prominent border
-        controls_frame = ttk.LabelFrame(self.frame, text="Group Display")
+        controls_frame = ttk.LabelFrame(self.frame, text="Cluster Display")
         controls_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
         
         # Force minimum size
         controls_frame.grid_propagate(False)
         controls_frame.configure(height=150, width=350)  # Set minimum dimensions
         
-        # Row range controls
-        range_frame = ttk.Frame(controls_frame)
-        range_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+        # Cluster selection (primary method)
+        self.cluster_frame = ttk.Frame(controls_frame)
+        self.cluster_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
         
-        ttk.Label(range_frame, text="Row Range:").grid(row=0, column=0, sticky='w', padx=5)
-        self.range_entry = ttk.Entry(range_frame, width=20)
-        self.range_entry.grid(row=0, column=1, sticky='ew', padx=5)
-        ttk.Label(range_frame, text="(e.g., 8-44, 50-56)").grid(row=0, column=2, sticky='w', padx=5)
+        ttk.Label(self.cluster_frame, text="Select Cluster:").grid(row=0, column=0, sticky='w', padx=5)
+        self.cluster_dropdown = ttk.Combobox(self.cluster_frame, textvariable=self.cluster_selection, state='readonly')
+        self.cluster_dropdown.grid(row=0, column=1, sticky='ew', padx=5)
+        self.cluster_dropdown.bind('<<ComboboxSelected>>', lambda e: self._update_selection())
         
-        # Selection mode radio buttons (simplified)
-        if 'Cluster' in self.df.columns:
-            mode_frame = ttk.Frame(controls_frame)
-            mode_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
-            
-            ttk.Radiobutton(
-                mode_frame,
-                text="Row Range",
-                variable=self.selection_mode,
-                value='row_range',
-                command=self._on_mode_change
-            ).grid(row=0, column=0, sticky='w', padx=5)
-            
-            ttk.Radiobutton(
-                mode_frame,
-                text="Cluster",
-                variable=self.selection_mode,
-                value='cluster',
-                command=self._on_mode_change
-            ).grid(row=0, column=1, sticky='w', padx=5)
+        self.cluster_frame.grid_columnconfigure(1, weight=1)
+        
+        # Note: Row Range functionality removed as no longer needed
+        # Cluster selection is now the primary and only selection method
         
         # Visibility controls in their own frame
         control_frame = ttk.Frame(controls_frame)
-        control_frame.grid(row=2, column=0, sticky='ew', padx=5, pady=5)
+        control_frame.grid(row=3, column=0, sticky='ew', padx=5, pady=5)
         
         ttk.Checkbutton(
             control_frame,
-            text="Show Selection",
+            text="Show Selection Only",
             variable=self.visibility_enabled,
             command=self._on_visibility_toggle
         ).grid(row=0, column=0, sticky='w', padx=5)
         
         ttk.Button(
             control_frame,
-            text="Apply",
-            command=self._update_selection
-        ).grid(row=0, column=1, sticky='w', padx=5)
-        
-        ttk.Button(
-            control_frame,
             text="Clear",
             command=self.clear_selection
-        ).grid(row=0, column=2, sticky='w', padx=5)
+        ).grid(row=0, column=1, sticky='w', padx=5)
         
         # Configure grid weights
         controls_frame.grid_columnconfigure(0, weight=1)
-        range_frame.grid_columnconfigure(1, weight=1)
         
-        # Create cluster dropdown if needed (initially hidden)
-        self.cluster_frame = ttk.Frame(controls_frame)
-        self.cluster_frame.grid(row=3, column=0, sticky='ew', padx=5, pady=2)
-        
-        ttk.Label(self.cluster_frame, text="Cluster:").grid(row=0, column=0, sticky='w', padx=5)
-        self.cluster_dropdown = ttk.Combobox(self.cluster_frame, textvariable=self.cluster_selection, state='readonly')
-        self.cluster_dropdown.grid(row=0, column=1, sticky='ew', padx=5)
-        self.cluster_dropdown.bind('<<ComboboxSelected>>', lambda e: self._update_selection())
-        
-        self.cluster_frame.grid_columnconfigure(1, weight=1)
-        self.cluster_frame.grid_remove()  # Hide initially
+    def _initialize_ui_state(self):
+        """Initialize the UI state based on available data"""
+        try:
+            # Always use cluster mode now
+            self.selection_mode.set('cluster')
+            
+            # Check if we have cluster data available
+            if 'Cluster' in self.df.columns and not self.df['Cluster'].isna().all():
+                # Clusters available - update dropdown
+                self._update_cluster_dropdown()
+                print(f"DEBUG: Cluster Display initialized with {len(self.cluster_dropdown['values'])} clusters")
+            else:
+                # No clusters available - show message
+                print("DEBUG: No cluster data available - user should run K-means first")
+        except Exception as e:
+            print(f"Error initializing Group Display UI state: {e}")
 
     def update_row_mapping(self):
         """Create a mapping between spreadsheet row numbers and DataFrame indices"""
@@ -168,27 +153,20 @@ class GroupDisplayManager:
             traceback.print_exc()
     
     def _on_mode_change(self):
-        """Handle selection mode change"""
-        mode = self.selection_mode.get()
+        """Handle selection mode change (cluster mode only now)"""
+        # Always use cluster mode
+        self.selection_mode.set('cluster')
         
-        if mode == 'cluster':
-            # Check if clusters exist
-            if 'Cluster' not in self.df.columns or self.df['Cluster'].isna().all():
-                messagebox.showwarning(
-                    "No Clusters Available",
-                    "Please run K-means clustering first to create clusters."
-                )
-                self.selection_mode.set('row_range')
-                return
-            
-            # Show cluster controls, hide range controls
-            self.range_frame.grid_remove()
-            self._update_cluster_dropdown()
-            self.cluster_frame.grid()
-        else:  # 'row_range'
-            # Show range controls, hide cluster controls
-            self.cluster_frame.grid_remove()
-            self.range_frame.grid()
+        # Check if clusters exist
+        if 'Cluster' not in self.df.columns or self.df['Cluster'].isna().all():
+            messagebox.showwarning(
+                "No Clusters Available",
+                "Please run K-means clustering first to create clusters."
+            )
+            return
+        
+        # Update cluster dropdown
+        self._update_cluster_dropdown()
         
         # Clear current selection when changing modes
         self.visible_indices.clear()
@@ -217,68 +195,28 @@ class GroupDisplayManager:
             self.visible_indices.clear()
             self.on_visibility_change()
     
-    def _parse_range_str(self, range_str: str) -> Set[int]:
-        """
-        Parse a range string like '8-44, 50-56' into a set of DataFrame indices.
-        Handles conversion from spreadsheet rows (1-based) to DataFrame indices.
-        """
-        indices = set()
-        
-        if not range_str.strip():
-            return indices
-            
-        try:
-            # Split by comma and process each range
-            for range_part in range_str.split(','):
-                range_part = range_part.strip()
-                if not range_part:
-                    continue
-                    
-                if '-' in range_part:
-                    # Handle range like 8-44
-                    start_str, end_str = range_part.split('-')
-                    start_row = int(start_str.strip())
-                    end_row = int(end_str.strip())
-                    
-                    # Convert to DataFrame indices using row mapping
-                    for row in range(start_row, end_row + 1):
-                        if row in self.row_mapping:
-                            indices.add(self.row_mapping[row])
-                else:
-                    # Handle single row like 8
-                    row = int(range_part.strip())
-                    if row in self.row_mapping:
-                        indices.add(self.row_mapping[row])
-        except ValueError as e:
-            messagebox.showerror("Invalid Range", f"Invalid range format: {str(e)}")
-        
-        return indices
+    # Row range parsing method removed - no longer needed
     
     def _update_selection(self):
-        """Update the current selection based on mode and input"""
+        """Update the current selection based on cluster selection"""
         if not self.visibility_enabled.get():
             return
             
         self.visible_indices.clear()
         
-        if self.selection_mode.get() == 'cluster':
-            # Cluster-based selection
-            selected_cluster = self.cluster_selection.get()
-            if 'Cluster' in self.df.columns and selected_cluster:
-                try:
-                    # Convert string back to appropriate type (int, float, etc.)
-                    cluster_value = type(self.df['Cluster'].dropna().iloc[0])(selected_cluster)
-                    # Find rows with the selected cluster
-                    cluster_mask = self.df['Cluster'] == cluster_value
-                    self.visible_indices.update(
-                        self.df[cluster_mask].index.tolist()
-                    )
-                except (ValueError, IndexError):
-                    print(f"Error converting cluster value: {selected_cluster}")
-        else:  # row_range mode
-            range_str = self.range_entry.get().strip()
-            if range_str:
-                self.visible_indices.update(self._parse_range_str(range_str))
+        # Cluster-based selection (only mode now)
+        selected_cluster = self.cluster_selection.get()
+        if 'Cluster' in self.df.columns and selected_cluster:
+            try:
+                # Convert string back to appropriate type (int, float, etc.)
+                cluster_value = type(self.df['Cluster'].dropna().iloc[0])(selected_cluster)
+                # Find rows with the selected cluster
+                cluster_mask = self.df['Cluster'] == cluster_value
+                selected_indices = self.df[cluster_mask].index.tolist()
+                self.visible_indices.update(selected_indices)
+                print(f"DEBUG: Selected cluster {cluster_value}, found {len(selected_indices)} points")
+            except (ValueError, IndexError) as e:
+                print(f"Error converting cluster value '{selected_cluster}': {e}")
         
         # Trigger update in main application
         self.on_visibility_change()
@@ -286,7 +224,7 @@ class GroupDisplayManager:
     def clear_selection(self):
         """Clear the current selection"""
         self.visible_indices.clear()
-        self.range_entry.delete(0, tk.END)
+        self.cluster_selection.set('')  # Clear cluster selection
         self.visibility_enabled.set(False)
         self.on_visibility_change()
     
@@ -297,9 +235,8 @@ class GroupDisplayManager:
         # Update row mapping
         self.update_row_mapping()
         
-        # Update cluster dropdown if in cluster mode
-        if self.selection_mode.get() == 'cluster':
-            self._update_cluster_dropdown()
+        # Update cluster dropdown (always in cluster mode now)
+        self._update_cluster_dropdown()
         
         # Reapply current selection with updated DataFrame
         if self.visibility_enabled.get():

@@ -56,15 +56,15 @@ class ColorDataBridge:
     def load_color_points_from_database(self, sample_set_name: str, 
                                       image_filter: Optional[str] = None,
                                       limit: Optional[int] = None) -> Tuple[List[ColorPoint], str]:
-        """Load color data from database and convert to ColorPoint objects.
+        """Load color data from database and convert to normalized ColorPoint objects.
         
         Args:
             sample_set_name: Name of the sample set database
             image_filter: Optional filter to only include specific images
-            limit: Optional limit on number of points to load
+            limit: Optional[int] on number of points to load
             
         Returns:
-            Tuple of (List of ColorPoint objects, detected database format string)
+            Tuple of (List of ColorPoint objects with normalized values, "NORMALIZED" format string)
         """
         color_points = []
         
@@ -84,50 +84,32 @@ class ColorDataBridge:
                 measurements = measurements[:limit]
             
             print(f"Loaded {len(measurements)} measurements from {sample_set_name}")
+            print(f"🔧 NORMALIZATION: Converting all data to normalized format for unified Ternary/Plot_3D compatibility")
             
-            # INTELLIGENT FORMAT DETECTION: Determine if database contains normalized or actual Lab values
-            db_format = self._detect_database_format(measurements, sample_set_name)
-            print(f"🔍 DATABASE FORMAT DETECTION: {sample_set_name} appears to contain {db_format} values")
-            
-            # Convert each measurement to a ColorPoint
+            # Convert each measurement to a normalized ColorPoint
             for i, measurement in enumerate(measurements):
                 try:
-                    # Generate unique ID for this point (needed for debug messages)
+                    # Generate unique ID for this point
                     image_name = measurement.get('image_name', 'unknown')
                     coord_point = measurement.get('coordinate_point', i+1)
                     point_id = f"{image_name}_pt{coord_point}"
                     
-                    # Extract required data
+                    # Extract L*a*b* values and normalize them for unified system
                     raw_l = measurement.get('l_value', 50.0)
                     raw_a = measurement.get('a_value', 0.0)
                     raw_b = measurement.get('b_value', 0.0)
                     
-                    # Apply format correction based on detected database format
-                    if db_format == 'NORMALIZED':
-                        # Database contains normalized values - convert to actual Lab values
-                        corrected_l = raw_l * 100.0  # 0-1 → 0-100
-                        corrected_a = (raw_a * 255.0) - 127.5  # 0-1 → -127.5 to +127.5 
-                        corrected_b = (raw_b * 255.0) - 127.5  # 0-1 → -127.5 to +127.5
-                        lab = (corrected_l, corrected_a, corrected_b)
-                        
-                        if i < 3:  # Log first few corrections
-                            print(f"🔧 DENORMALIZATION: Point {i} - DB normalized ({raw_l:.4f}, {raw_a:.4f}, {raw_b:.4f}) → Lab ({corrected_l:.2f}, {corrected_a:.2f}, {corrected_b:.2f})")
-                    elif db_format == 'ACTUAL_LAB':
-                        # Database contains actual Lab values - use as-is
+                    # Auto-detect and normalize L*a*b* values based on range
+                    if (0.0 <= raw_l <= 1.0 and abs(raw_a) <= 1.0 and abs(raw_b) <= 1.0):
+                        # Already normalized - use as actual L*a*b*
+                        lab = (raw_l * 100.0, (raw_a * 255.0) - 127.5, (raw_b * 255.0) - 127.5)
+                        if i < 3:
+                            print(f"✅ NORMALIZED INPUT: Point {i} - ({raw_l:.3f}, {raw_a:.3f}, {raw_b:.3f}) → Lab ({lab[0]:.1f}, {lab[1]:.1f}, {lab[2]:.1f})")
+                    else:
+                        # Actual L*a*b* values - use as-is
                         lab = (raw_l, raw_a, raw_b)
                         if i < 3:
-                            print(f"✅ ACTUAL LAB: Point {i} - Using Lab values as-is ({raw_l:.2f}, {raw_a:.2f}, {raw_b:.2f})")
-                    else:
-                        # MIXED or UNKNOWN - apply heuristic per-point detection (fallback)
-                        if (0.0 <= raw_l <= 1.0 and abs(raw_a) <= 1.0 and abs(raw_b) <= 1.0):
-                            corrected_l = raw_l * 100.0
-                            corrected_a = (raw_a * 255.0) - 127.5
-                            corrected_b = (raw_b * 255.0) - 127.5
-                            lab = (corrected_l, corrected_a, corrected_b)
-                            if i < 3:
-                                print(f"⚠️ HEURISTIC CORRECTION: Point {i} - ({raw_l:.4f}, {raw_a:.4f}, {raw_b:.4f}) → Lab ({corrected_l:.2f}, {corrected_a:.2f}, {corrected_b:.2f})")
-                        else:
-                            lab = (raw_l, raw_a, raw_b)
+                            print(f"✅ ACTUAL LAB INPUT: Point {i} - Lab ({raw_l:.1f}, {raw_a:.1f}, {raw_b:.1f})")
                     
                     # Get stored RGB values
                     stored_rgb = (
@@ -144,13 +126,13 @@ class ColorDataBridge:
                         
                         try:
                             from colorspacious import cspace_convert
-                            # Convert L*a*b* to RGB (sRGB1 gives 0-1 range)
-                            rgb_01 = cspace_convert(lab, "CIELab", "sRGB1")
-                            # Convert to 0-255 range with proper clamping
-                            rgb = tuple(max(0, min(255, c * 255)) for c in rgb_01)
+                            # Convert L*a*b* to normalized RGB (0-1 range for unified system)
+                            rgb = cspace_convert(lab, "CIELab", "sRGB1")
+                            # Clamp to valid range
+                            rgb = tuple(max(0.0, min(1.0, c)) for c in rgb)
                             
                             if i < 5:  # Debug first few conversions
-                                print(f"DEBUG: Colorspacious - Lab{lab} -> RGB_0-1{rgb_01} -> RGB_0-255{rgb}")
+                                print(f"DEBUG: Colorspacious - Lab{lab} -> Normalized RGB{rgb}")
                         except (ImportError, Exception) as conv_error:
                             if i < 3:
                                 print(f"DEBUG: Colorspacious failed ({conv_error}), using fallback conversion")
@@ -167,41 +149,51 @@ class ColorDataBridge:
                             a_val = max(-128, min(127, a))  # -128 to +127
                             b_val_lab = max(-128, min(127, b_lab))  # -128 to +127
                             
-                            # Convert Lab to RGB using more accurate approximation
-                            # Base lightness component
-                            base = l_norm * 255
+                            # Convert Lab to normalized RGB (0-1) using approximation
+                            # Base lightness component (normalized)
+                            base = l_norm  # Already 0-1
                             
-                            # a* affects Red-Green balance
-                            if a_val > 0:  # Positive a* = more red
-                                r = base + (a_val * 0.8)  # Boost red
-                                g = base - (a_val * 0.4)  # Reduce green
+                            # a* affects Red-Green balance (normalize influence)
+                            a_influence = a_val / 128.0  # -1 to +1
+                            b_influence = b_val_lab / 128.0  # -1 to +1
+                            
+                            if a_influence > 0:  # Positive a* = more red
+                                r = base + (a_influence * 0.3)  # Boost red
+                                g = base - (a_influence * 0.15)  # Reduce green
                             else:  # Negative a* = more green  
-                                r = base + (a_val * 0.4)  # Reduce red (a* is negative)
-                                g = base - (a_val * 0.8)  # Boost green (double negative = positive)
+                                r = base + (a_influence * 0.15)  # Reduce red
+                                g = base - (a_influence * 0.3)  # Boost green
                             
                             # b* affects Blue-Yellow balance
-                            if b_val_lab > 0:  # Positive b* = more yellow (boost red+green, reduce blue)
-                                r += (b_val_lab * 0.3)
-                                g += (b_val_lab * 0.3)  
-                                b_val = base - (b_val_lab * 0.6)  # Reduce blue
-                            else:  # Negative b* = more blue (reduce red+green, boost blue)
-                                r += (b_val_lab * 0.2)  # Reduce red (b* is negative)
-                                g += (b_val_lab * 0.2)  # Reduce green (b* is negative)
-                                b_val = base - (b_val_lab * 0.8)  # Boost blue (double negative = positive)
+                            if b_influence > 0:  # Positive b* = more yellow
+                                r += (b_influence * 0.15)
+                                g += (b_influence * 0.15)  
+                                b_val = base - (b_influence * 0.3)  # Reduce blue
+                            else:  # Negative b* = more blue
+                                r += (b_influence * 0.1)  # Reduce red
+                                g += (b_influence * 0.1)  # Reduce green
+                                b_val = base - (b_influence * 0.4)  # Boost blue
                             
-                            # Clamp to valid RGB range
-                            r = max(0, min(255, r))
-                            g = max(0, min(255, g))
-                            b_val = max(0, min(255, b_val))
+                            # Clamp to valid normalized RGB range (0-1)
+                            r = max(0.0, min(1.0, r))
+                            g = max(0.0, min(1.0, g))
+                            b_val = max(0.0, min(1.0, b_val))
                             rgb = (r, g, b_val)
                             
                             if i < 3:
-                                print(f"DEBUG: Fallback Lab{lab} -> L*:{l:.1f}, a*:{a_val}, b*:{b_val_lab} -> RGB{rgb}")
+                                print(f"DEBUG: Fallback Lab{lab} -> L*:{l:.1f}, a*:{a_val}, b*:{b_val_lab} -> Normalized RGB{rgb}")
                     else:
-                        # Use stored RGB values
-                        rgb = stored_rgb
-                        if i < 3:
-                            print(f"DEBUG: Point {i} using stored RGB: {rgb}")
+                        # Normalize stored RGB values (convert from 0-255 to 0-1 if needed)
+                        if max(stored_rgb) > 1.0:
+                            # Stored as 0-255, normalize to 0-1
+                            rgb = tuple(c / 255.0 for c in stored_rgb)
+                            if i < 3:
+                                print(f"DEBUG: Point {i} normalized stored RGB: {stored_rgb} → {rgb}")
+                        else:
+                            # Already normalized
+                            rgb = stored_rgb
+                            if i < 3:
+                                print(f"DEBUG: Point {i} using normalized stored RGB: {rgb}")
                     
                     # point_id already created above for consistency
                     
@@ -253,8 +245,8 @@ class ColorDataBridge:
                     print(f"Warning: Failed to convert measurement {i}: {e}")
                     continue
             
-            print(f"Successfully converted {len(color_points)} measurements to ColorPoint objects")
-            return color_points, db_format
+            print(f"Successfully converted {len(color_points)} measurements to normalized ColorPoint objects")
+            return color_points, "NORMALIZED"
             
         except Exception as e:
             print(f"Error loading color points from {sample_set_name}: {e}")

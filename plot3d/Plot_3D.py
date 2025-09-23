@@ -1287,38 +1287,43 @@ class Plot3DApp:
         # Ensure the control frame can expand properly
         self.control_frame.grid_columnconfigure(0, weight=1)
         
-        button_frame = create_button_frame(self.control_frame, on_refresh=self.refresh_plot)
-        button_frame.grid(row=6, column=0, sticky='ew', padx=5, pady=5)
-
-        # Create highlight frame and manager
-        self.highlight_frame = ttk.Frame(self.control_frame)
-        self.highlight_frame.grid(row=7, column=0, sticky='ew', padx=5, pady=5)
-        # Initialize highlight manager
+        # Create user interaction section (compact and intuitive)
+        interaction_frame = ttk.LabelFrame(self.control_frame, text="User Interaction")
+        interaction_frame.grid(row=4, column=0, sticky='ew', padx=5, pady=5)
+        interaction_frame.grid_columnconfigure(0, weight=1)
+        
+        # Plot refresh button (now in interaction section)
+        button_frame = create_button_frame(interaction_frame, on_refresh=self.refresh_plot)
+        button_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=2)
+        
+        # Point identification (click-to-highlight) - more compact design
+        self.highlight_frame = ttk.Frame(interaction_frame)
+        self.highlight_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=2)
+        # Initialize highlight manager with improved UI and 2D view support
         self.highlight_manager = HighlightManager(
-            self.root,
+            self,  # Pass self as master so highlight manager can call refresh_plot
             self.highlight_frame,
             self.fig.gca(),
             self.canvas,
             self.df,
             self.use_rgb,
+            rotation_controls=self.rotation_controls  # Pass rotation controls for 2D views
         )
 
-        # Create visualization options frame
-        
-        # Create group display frame with explicit LabelFrame and styling
-        group_display_frame = ttk.LabelFrame(self.control_frame, text="Group Display")
-        group_display_frame.grid(row=8, column=0, sticky='nsew', padx=5, pady=5)
+        # Cluster Display (simplified and more prominent)
+        group_display_frame = ttk.LabelFrame(self.control_frame, text="Cluster Display")
+        group_display_frame.grid(row=5, column=0, sticky='nsew', padx=5, pady=5)
 
-        # Force minimum size and prevent frame from shrinking
+        # Reduced height since UI is now simpler
         group_display_frame.grid_propagate(False)
-        group_display_frame.configure(height=180, width=350)  # Adjusted height
+        group_display_frame.configure(height=140, width=350)  # Reduced height
         group_display_frame.grid_columnconfigure(0, weight=1)
 
-        # Add style for better visibility
+        # Simplified styling
         style = ttk.Style()
-        style.configure('GroupDisplay.TLabelframe', borderwidth=2, relief='solid')
-        style.configure('GroupDisplay.TLabelframe.Label', font=('Arial', 10, 'bold'))
-        group_display_frame.configure(style='GroupDisplay.TLabelframe')
+        style.configure('ClusterDisplay.TLabelframe', borderwidth=1, relief='groove')
+        style.configure('ClusterDisplay.TLabelframe.Label', font=('Arial', 9, 'bold'))
+        group_display_frame.configure(style='ClusterDisplay.TLabelframe')
 
         # Initialize group display manager
         self.group_display_manager = GroupDisplayManager(
@@ -1327,14 +1332,10 @@ class Plot3DApp:
             self.df,
             on_visibility_change=self.refresh_plot
         )
-
-        # Force frame update and ensure proper layout
-        group_display_frame.update()
-        group_display_frame.update_idletasks()
         
         # Create trendline frame after group display
         self.trendline_frame = ttk.LabelFrame(self.control_frame, text="Trend Lines")
-        self.trendline_frame.grid(row=9, column=0, sticky='ew', padx=5, pady=5)
+        self.trendline_frame.grid(row=6, column=0, sticky='ew', padx=5, pady=5)
 
         # Add linear trendline toggle
         ttk.Checkbutton(
@@ -1381,7 +1382,7 @@ class Plot3DApp:
         if not self.is_realtime_mode and hasattr(self, 'kmeans_manager') and self.kmeans_manager:
             kmeans_frame = self.kmeans_manager.create_gui(self.control_frame)
             if kmeans_frame:
-                kmeans_frame.grid(row=10, column=0, sticky='ew', padx=5, pady=5)
+                kmeans_frame.grid(row=7, column=0, sticky='ew', padx=5, pady=5)
                 print("K-Means clustering GUI created successfully")
             else:
                 print("Warning: Failed to create K-Means clustering GUI")
@@ -1395,7 +1396,7 @@ class Plot3DApp:
             try:
                 delta_e_frame = self.delta_e_manager.create_gui(self.control_frame)
                 if delta_e_frame:
-                    delta_e_frame.grid(row=11, column=0, sticky='ew', padx=5, pady=5)
+                    delta_e_frame.grid(row=8, column=0, sticky='ew', padx=5, pady=5)
                     print("ΔE Manager GUI created successfully")
                 else:
                     print("Warning: Failed to create ΔE Manager GUI")
@@ -1408,7 +1409,7 @@ class Plot3DApp:
         
         # Create sphere visibility frame with scrollable content
         sphere_frame = ttk.LabelFrame(self.control_frame, text="Sphere Visibility")
-        sphere_frame.grid(row=12, column=0, sticky='nsew', padx=5, pady=5)
+        sphere_frame.grid(row=9, column=0, sticky='nsew', padx=5, pady=5)
 
         # Force minimum size and prevent frame from shrinking
         sphere_frame.grid_propagate(False)

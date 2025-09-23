@@ -55,11 +55,24 @@ class TernaryDatasheetManager:
         try:
             from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
             
+            # DEBUG: Check what we received
+            logger.info(f"📊 DATASHEET MANAGER DEBUG: Received {len(color_points) if color_points else 0} color points")
+            logger.info(f"📊 DATASHEET MANAGER DEBUG: Sample set name: {sample_set_name}")
+            logger.info(f"📊 DATASHEET MANAGER DEBUG: Has clusters: {bool(clusters)}")
+            
+            if not color_points:
+                logger.warning("⚠️ DATASHEET MANAGER DEBUG: No color points received! This is the problem.")
+                # Still show dialog but with 0 points to help user understand
+                self._show_datasheet_ready_dialog(0, "")
+                return None
+            
             # Create datasheet name based on current data
             if external_file_path:
                 datasheet_name = f"Ternary: {os.path.basename(external_file_path, '.ods').replace('.xlsx', '')}"
             else:
                 datasheet_name = f"Ternary: {sample_set_name}"
+            
+            logger.info(f"📊 DATASHEET MANAGER DEBUG: Creating datasheet with name: {datasheet_name}")
             
             # Create realtime datasheet (don't load initial data, we'll populate it)
             datasheet = RealtimePlot3DSheet(
@@ -67,6 +80,8 @@ class TernaryDatasheetManager:
                 sample_set_name=datasheet_name,
                 load_initial_data=False
             )
+            
+            logger.info(f"📊 DATASHEET MANAGER DEBUG: About to populate datasheet with {len(color_points)} points")
             
             # Populate datasheet with current ternary data converted to Plot_3D format
             self.populate_datasheet_with_ternary_data(datasheet, color_points, clusters)

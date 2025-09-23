@@ -47,7 +47,7 @@ except ImportError:
 class ColorPoint:
     """Represents a color point with both coordinate systems."""
     id: str
-    rgb: Tuple[float, float, float]        # Original RGB values
+    rgb: Tuple[float, float, float]        # Normalized RGB values (0-1 range)
     lab: Tuple[float, float, float]        # L*a*b* values  
     ternary_coords: Tuple[float, float]    # 2D ternary coordinates
     metadata: Dict[str, Any]               # Additional info (stamp name, etc.)
@@ -76,10 +76,10 @@ class TernaryPlotter:
         }
     
     def rgb_to_ternary(self, rgb: Tuple[float, float, float]) -> Tuple[float, float]:
-        """Convert RGB values to ternary coordinates.
+        """Convert normalized RGB values to ternary coordinates.
         
         Args:
-            rgb: RGB tuple (0-255 values)
+            rgb: RGB tuple (0-1 normalized values)
             
         Returns:
             (x, y) coordinates in ternary space
@@ -135,8 +135,8 @@ class TernaryPlotter:
             
             # Determine point color based on color_by parameter
             if color_by == "auto":
-                # Use the actual RGB color (normalized)
-                colors.append(tuple(c/255.0 for c in point.rgb))
+                # Use the actual RGB color (already normalized 0-1)
+                colors.append(point.rgb)
             elif color_by == "lightness":
                 # Color by L* value from Lab
                 lightness = point.lab[0] / 100.0  # Normalize L* (0-100) to 0-1
