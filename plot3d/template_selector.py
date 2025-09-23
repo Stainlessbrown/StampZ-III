@@ -1,14 +1,17 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 import logging
 from utils.rigid_plot3d_templates import create_rigid_plot3d_templates, RigidPlot3DTemplate
+from utils.color_data_bridge import ColorDataBridge
 
 class TemplateSelector:
     def __init__(self, parent=None):
         self.file_path = None
         self.root = None
         self.parent = parent
+        self.database_mode = False  # Flag to indicate database selection vs file selection
+        self.selected_database = None  # Store selected database name
         self.create_and_run_dialog()
         
     def create_and_run_dialog(self):
@@ -30,10 +33,39 @@ class TemplateSelector:
             self.root.attributes("-topmost", True)
             
             # Add heading
-            heading = tk.Label(self.root, text="Plot_3D Template Selector", font=("Arial", 14, "bold"))
+            heading = tk.Label(self.root, text="Plot_3D Data Source Selector", font=("Arial", 14, "bold"))
             heading.pack(pady=10)
             
-            # Open existing .ods file button (most common use case)
+            # Check for available databases and add database option if available
+            try:
+                bridge = ColorDataBridge()
+                sample_sets = bridge.get_available_sample_sets()
+                if sample_sets:
+                    # Load from internal database button (NEW - highest priority)
+                    database_button = tk.Button(
+                        self.root, 
+                        text="🗄️ Load Internal Database",
+                        command=self.select_database,
+                        width=25,
+                        height=2,
+                        bg="lightcyan",
+                        fg="black",
+                        font=("Arial", 11, "bold")
+                    )
+                    database_button.pack(pady=8)
+                    
+                    # Add description for database
+                    db_desc = tk.Label(
+                        self.root,
+                        text=f"(Access {len(sample_sets)} internal databases shared with Ternary)",
+                        font=("Arial", 9),
+                        fg="#006666"
+                    )
+                    db_desc.pack(pady=(0, 15))
+            except Exception as e:
+                logging.warning(f"Could not access internal databases: {e}")
+            
+            # Open existing .ods file button
             open_button = tk.Button(
                 self.root, 
                 text="📊 Open Existing .ods File",
@@ -105,6 +137,10 @@ class TemplateSelector:
                 x = self.parent.winfo_x() + (self.parent.winfo_width() // 2) - (self.root.winfo_width() // 2)
                 y = self.parent.winfo_y() + (self.parent.winfo_height() // 2) - (self.root.winfo_height() // 2)
                 self.root.geometry(f"+{x}+{y}")
+                
+                # Ensure proper focus and modal behavior
+                self.root.focus_set()
+                self.root.focus_force()
                 
                 # Wait for window instead of starting mainloop in embedded mode
                 self.parent.wait_window(self.root)
@@ -276,4 +312,129 @@ class TemplateSelector:
                 self.file_path = os.path.abspath(selected_file)
                 logging.info(f"Selected existing rigid template: {self.file_path}")
                 self.root.destroy()
+    
+    def select_database(self):
+        """Select from available internal databases."""
+        logging.debug("Select Database")
+        print("DEBUG: Starting database selection...")
+        
+        try:
+            print("DEBUG: Creating ColorDataBridge...")
+            bridge = ColorDataBridge()
+            print("DEBUG: Getting available sample sets...")
+            sample_sets = bridge.get_available_sample_sets()
+            print(f"DEBUG: Found {len(sample_sets)} sample sets: {sample_sets}")
+            
+            if not sample_sets:
+                print("DEBUG: No sample sets found, showing info dialog")
+                messagebox.showinfo("No Databases", "No internal databases found.")
+                return
+            
+            # Create database selection dialog first, then hide main dialog
+            print("DEBUG: Creating database dialog...")
+            try:
+                dialog = tk.Toplevel(self.root)
+                print("DEBUG: Dialog toplevel created")
+                dialog.title("Select Database")
+                print("DEBUG: Dialog title set")
+                
+                # Position dialog offset from main window to avoid overlap
+                main_x = self.root.winfo_x()
+                main_y = self.root.winfo_y()
+                main_width = self.root.winfo_width()
+                
+                # Place dialog to the right of main window with some padding
+                dialog_x = main_x + main_width + 20
+                dialog_y = main_y
+                
+                dialog.geometry(f"400x500+{dialog_x}+{dialog_y}")
+                print(f"DEBUG: Dialog positioned at {dialog_x},{dialog_y} (offset from main window)")
+                dialog.transient(self.root)
+                print("DEBUG: Dialog transient set")
+                dialog.grab_set()
+                print("DEBUG: Dialog grab set")
+                
+                # Position dialog and focus it
+                dialog.lift()
+                dialog.focus_set()
+                dialog.focus_force()
+                print("DEBUG: Dialog focused")
+                
+                ttk.Label(dialog, text="Select internal database:", font=('Arial', 12, 'bold')).pack(pady=10)
+                
+                # Create listbox for databases
+                listbox_frame = tk.Frame(dialog)
+                listbox_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+                
+                listbox = tk.Listbox(listbox_frame, height=12, font=('Arial', 10))
+                scrollbar = tk.Scrollbar(listbox_frame, orient="vertical")
+                listbox.configure(yscrollcommand=scrollbar.set)
+                scrollbar.configure(command=listbox.yview)
+                
+                # Add databases to listbox
+                for sample_set in sample_sets:
+                    listbox.insert(tk.END, sample_set)
+                    
+                listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                
+                # Info label
+                info_label = tk.Label(dialog, 
+                                     text="These databases are shared with Ternary Plot.\n" +
+                                          "Changes made in Plot_3D can be saved back to database.",
+                                     font=('Arial', 9), fg='#666666', justify=tk.CENTER)
+                info_label.pack(pady=10)
+                
+                def on_select():
+                    selection = listbox.curselection()
+                    if selection:
+                        selected_db = sample_sets[selection[0]]
+                        self.database_mode = True
+                        self.selected_database = selected_db
+                        self.file_path = None  # Clear file path since we're using database
+                        logging.info(f"Selected database: {selected_db}")
+                        dialog.attributes('-topmost', False)  # Remove topmost
+                        dialog.destroy()
+                        
+                        # Database selected, destroy main window
+                        self.root.destroy()
+                    else:
+                        messagebox.showwarning("No Selection", "Please select a database first.")
+                
+                def on_cancel():
+                    print("DEBUG: Database selection cancelled")
+                    dialog.destroy()
+                    self.root.lift()  # Bring main window back to focus
+                
+                # Handle dialog close button (X)
+                def on_dialog_close():
+                    print("DEBUG: Database dialog closed")
+                    dialog.destroy()
+                    self.root.lift()  # Bring main window back to focus
+                
+                dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
+                
+                # Buttons
+                button_frame = tk.Frame(dialog)
+                button_frame.pack(pady=10)
+                
+                tk.Button(button_frame, text="Load Database", command=on_select, 
+                         bg="lightcyan", font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+                tk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+                
+                # Dialog is positioned separately, just ensure it has focus
+                print("DEBUG: Database selection dialog ready")
+                dialog.lift()
+                dialog.focus_force()
+                
+            except Exception as dialog_error:
+                # If dialog creation fails, show error
+                logging.error(f"Error creating database dialog: {dialog_error}")
+                print(f"DEBUG: Dialog creation error: {dialog_error}")
+                messagebox.showerror("Dialog Error", f"Failed to create database selection dialog: {dialog_error}")
+            
+        except Exception as e:
+            logging.error(f"Error selecting database: {e}")
+            print(f"DEBUG: Database selection error: {e}")
+            messagebox.showerror("Error", f"Failed to access databases: {e}")
 

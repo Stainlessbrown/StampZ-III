@@ -137,10 +137,15 @@ class MenuManager:
         
         self.color_menu.add_separator()
         
-        self.color_menu.add_command(
-            label="RGB Ternary Analysis...",
-            command=self.app.open_advanced_color_visualization
-        )
+        try:
+            print("DEBUG: Adding Advanced Color Visualization menu item...")
+            self.color_menu.add_command(
+                label="Advanced Color Visualization...",
+                command=self.app.open_advanced_color_visualization
+            )
+            print("DEBUG: Advanced Color Visualization menu item added successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to add Advanced Color Visualization menu item: {e}")
         
     def _create_measurement_menu(self):
         """Create the Measurement menu."""

@@ -190,8 +190,8 @@ class TernaryExportManager:
             
             new_name = tkinter.simpledialog.askstring(
                 "Save As Database",
-                "Enter name for new Ternary database:",
-                initialvalue=f"Ternary_{clean_name}"
+                "Enter name for database (will use same database as Plot_3D for consistency):",
+                initialvalue=clean_name
             )
             
             if not new_name:

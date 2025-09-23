@@ -152,6 +152,36 @@ class GroupDisplayManager:
             import traceback
             traceback.print_exc()
     
+    def update_data(self, new_df):
+        """Update the DataFrame and refresh the display.
+        
+        Args:
+            new_df: New DataFrame to use for display management
+        """
+        try:
+            self.df = new_df
+            
+            # Update row mapping with new data
+            self.update_row_mapping()
+            
+            # Refresh cluster dropdown if we're in cluster mode
+            if self.selection_mode.get() == 'cluster':
+                self._update_cluster_dropdown()
+            
+            # Clear current selection as indices may have changed
+            self.visible_indices.clear()
+            
+            # Refresh the display
+            if self.on_visibility_change:
+                self.on_visibility_change()
+                
+            print(f"Group Display: Successfully updated with new data ({len(new_df)} points)")
+            
+        except Exception as e:
+            print(f"Error updating Group Display data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
     def _on_mode_change(self):
         """Handle selection mode change (cluster mode only now)"""
         # Always use cluster mode

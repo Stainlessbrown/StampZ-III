@@ -88,11 +88,6 @@ class TernaryPlotWindow:
         self.clusters = {}
         self.cluster_colors = self.cluster_manager.cluster_colors
         
-        self.show_hull = tk.BooleanVar(value=False)  # Start unchecked
-        self.show_clusters = tk.BooleanVar(value=False) 
-        self.show_spheres = tk.BooleanVar(value=False)  # Initialize spheres variable
-        self.n_clusters = tk.IntVar(value=3)
-        
         # Use command callbacks instead of trace callbacks for better macOS compatibility
         
         # Track external file for integration
@@ -182,10 +177,20 @@ class TernaryPlotWindow:
         self.window.resizable(True, True)
         self.window.minsize(800, 600)
         
-        if self.parent:
+        # NOTE: Don't set transient on macOS to avoid multi-monitor disappearing issues
+        # The window can still be launched from integrated mode but remains independently movable
+        import platform
+        if self.parent and platform.system() != 'Darwin':
             self.window.transient(self.parent)
+        # On macOS, leave window orphaned even in integrated mode for better window management
         
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        
+        # Initialize tkinter variables after window creation
+        self.show_hull = tk.BooleanVar(value=False)  # Start unchecked
+        self.show_clusters = tk.BooleanVar(value=False) 
+        self.show_spheres = tk.BooleanVar(value=False)  # Initialize spheres variable
+        self.n_clusters = tk.IntVar(value=3)
         
         # macOS: Force window to appear
         if platform.system() == 'Darwin':
@@ -397,10 +402,10 @@ class TernaryPlotWindow:
         hull_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=3)
         row_idx += 1
         
-        # Convex Hull checkbox with improved styling
+        # Convex Hull checkbox with improved styling - using manual toggle for macOS compatibility
         hull_cb = ttk.Checkbutton(hull_frame, text="Show Convex Hull", 
                                  variable=self.show_hull, 
-                                 command=lambda: self._on_hull_toggle())
+                                 command=self._manual_hull_toggle)
         hull_cb.pack(fill=tk.X, padx=5)
         
         # Spheres checkbox
@@ -410,7 +415,7 @@ class TernaryPlotWindow:
         
         spheres_cb = ttk.Checkbutton(spheres_frame, text="Use Sphere Visualization", 
                                     variable=self.show_spheres, 
-                                    command=lambda: self._on_spheres_toggle())
+                                    command=self._manual_spheres_toggle)
         spheres_cb.pack(fill=tk.X, padx=5)
         
         return row_idx
@@ -425,10 +430,10 @@ class TernaryPlotWindow:
         cluster_frame.grid_columnconfigure(1, weight=1)
         row_idx += 1
         
-        # K-means activation checkbox
+        # K-means activation checkbox - using manual toggle for macOS compatibility
         clusters_cb = ttk.Checkbutton(cluster_frame, text="Enable K-means Clusters", 
                                      variable=self.show_clusters, 
-                                     command=lambda: self._on_clusters_toggle())
+                                     command=self._manual_clusters_toggle)
         clusters_cb.grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
         
         # Cluster count control
@@ -479,19 +484,18 @@ class TernaryPlotWindow:
         """Create application control section with exit buttons."""
         section_frame, row_idx = self._create_section_header("Application Control", start_row)
         
-        # Exit buttons
+        # Exit buttons - standardized for both internal and standalone modes
         exit_frame = ttk.Frame(self.control_frame)
         exit_frame.grid(row=row_idx, column=0, sticky='ew', padx=20, pady=5)
         exit_frame.grid_columnconfigure(0, weight=1)
         row_idx += 1
         
+        # Both modes show the same buttons
         ttk.Button(exit_frame, text="← Return to Launcher", 
                   command=self._exit_ternary).grid(row=0, column=0, sticky='ew', pady=4, ipadx=15)
         
-        # Only show "Exit Application" if running standalone (no parent)
-        if not self.parent:
-            ttk.Button(exit_frame, text="🚪 Exit Application", 
-                      command=self._exit_application).grid(row=1, column=0, sticky='ew', pady=4, ipadx=15)
+        ttk.Button(exit_frame, text="🚪 Exit Application", 
+                  command=self._exit_application).grid(row=1, column=0, sticky='ew', pady=4, ipadx=15)
         
         return row_idx
     
@@ -571,9 +575,14 @@ class TernaryPlotWindow:
                 else:
                     print("DEBUG: No clusters to plot after computation attempt")
             
-            # Update plot
+            # Update plot and force axis limits (prevent matplotlib auto-adjustment)
             self.ax.set_aspect('equal')
             self.ax.axis('off')
+            
+            # Force axis limits to prevent compression when clusters/legends are added/removed
+            self.ax.set_xlim(-0.15, 1.15)
+            self.ax.set_ylim(-0.15, 1.05)
+            
             self.canvas.draw()
             
             self._update_status(f"Plot refreshed: {len(self.color_points)} points")
@@ -763,15 +772,15 @@ class TernaryPlotWindow:
             
             logger.debug(f"DEBUG: Point {i} ternary coords: {point.ternary_coords}")
             
-            # Get marker style from metadata
+            # Get marker style from metadata (use ternary-specific keys)
             marker_style = 'o'  # default
-            if hasattr(point, 'metadata') and 'marker' in point.metadata and point.metadata['marker']:
-                marker_style = marker_map.get(point.metadata['marker'], 'o')
+            if hasattr(point, 'metadata') and 'ternary_marker' in point.metadata and point.metadata['ternary_marker']:
+                marker_style = marker_map.get(point.metadata['ternary_marker'], 'o')
             
-            # Get color from metadata or RGB
-            if (hasattr(point, 'metadata') and 'marker_color' in point.metadata and 
-                point.metadata['marker_color'] and point.metadata['marker_color'].lower() in color_map):
-                point_color = color_map[point.metadata['marker_color'].lower()]
+            # Get color from metadata or RGB (use ternary-specific keys)
+            if (hasattr(point, 'metadata') and 'ternary_marker_color' in point.metadata and 
+                point.metadata['ternary_marker_color'] and point.metadata['ternary_marker_color'].lower() in color_map):
+                point_color = color_map[point.metadata['ternary_marker_color'].lower()]
             else:
                 # Use RGB color of the point
                 point_color = tuple(c/255.0 for c in point.rgb)
@@ -846,7 +855,7 @@ class TernaryPlotWindow:
         
         logger.info(f"DEBUG: TOTAL PLOTTED POINTS: {total_plotted_points} out of {len(self.color_points)} available")
         
-        # Debug: Check for overlapping coordinates and apply jitter if needed
+        # Check for overlapping coordinates and apply display jitter if needed (without modifying actual data)
         coordinates = [(point.ternary_coords[0], point.ternary_coords[1]) for point in self.color_points]
         unique_coordinates = set(coordinates)
         if len(unique_coordinates) != len(coordinates):
@@ -857,30 +866,33 @@ class TernaryPlotWindow:
             duplicates = {coord: count for coord, count in coord_counts.items() if count > 1}
             logger.warning(f"DEBUG: Duplicate coordinates: {duplicates}")
             
-            # Apply small random jitter to overlapping points to make them visible
-            logger.info("DEBUG: Applying jitter to overlapping points for visibility...")
+            # Apply display jitter to marker groups WITHOUT modifying actual point data
+            logger.info("DEBUG: Applying display jitter to overlapping points for visibility...")
             import random
             random.seed(42)  # Consistent jitter across runs
             
+            # Apply jitter to the plotting coordinates in marker_groups, not the actual data
             coord_seen = {}
             jittered_count = 0
-            for point in self.color_points:
-                coord_key = (round(point.ternary_coords[0], 6), round(point.ternary_coords[1], 6))
-                if coord_key in coord_seen:
-                    # Add small random offset (0.015 = 1.5% of plot area)
-                    jitter_x = random.uniform(-0.015, 0.015)
-                    jitter_y = random.uniform(-0.015, 0.015)
-                    new_x = max(0.0, min(1.0, point.ternary_coords[0] + jitter_x))
-                    new_y = max(0.0, min(1.0, point.ternary_coords[1] + jitter_y))
-                    point.ternary_coords = (new_x, new_y, point.ternary_coords[2] if len(point.ternary_coords) > 2 else 0)
-                    coord_seen[coord_key] += 1
-                    jittered_count += 1
-                    if jittered_count <= 5:  # Log first 5 for debugging
-                        logger.debug(f"DEBUG: Jittered point {point.id}: {coord_key} -> ({new_x:.4f}, {new_y:.4f})")
-                else:
-                    coord_seen[coord_key] = 1
-                    
-            logger.info(f"DEBUG: Applied jitter to {jittered_count} overlapping points")
+            
+            for marker_style, group_data in marker_groups.items():
+                for i in range(len(group_data['x'])):
+                    coord_key = (round(group_data['x'][i], 6), round(group_data['y'][i], 6))
+                    if coord_key in coord_seen:
+                        # Add small random offset for display only
+                        jitter_x = random.uniform(-0.015, 0.015)
+                        jitter_y = random.uniform(-0.015, 0.015)
+                        group_data['x'][i] = max(0.0, min(1.0, group_data['x'][i] + jitter_x))
+                        group_data['y'][i] = max(0.0, min(1.0, group_data['y'][i] + jitter_y))
+                        coord_seen[coord_key] += 1
+                        jittered_count += 1
+                        if jittered_count <= 5:  # Log first 5 for debugging
+                            point_idx = group_data['indices'][i]
+                            logger.debug(f"DEBUG: Display jitter applied to point {self.color_points[point_idx].id}: {coord_key} -> ({group_data['x'][i]:.4f}, {group_data['y'][i]:.4f})")
+                    else:
+                        coord_seen[coord_key] = 1
+                        
+            logger.info(f"DEBUG: Applied display jitter to {jittered_count} overlapping points (original data unchanged)")
         else:
             logger.info(f"DEBUG: All {len(coordinates)} points have unique coordinates")
         
@@ -1027,6 +1039,58 @@ class TernaryPlotWindow:
         print("DEBUG: Calling _refresh_plot...")
         self._refresh_plot()
     
+    def _save_original_coordinates(self):
+        """Save original ternary coordinates before clustering transformations."""
+        if not self.color_points:
+            return
+        
+        print("DEBUG: Saving original coordinates for restoration")
+        self.original_coordinates = {}
+        
+        for i, point in enumerate(self.color_points):
+            if hasattr(point, 'ternary_coords') and point.ternary_coords is not None:
+                # Store a deep copy of the original coordinates
+                self.original_coordinates[i] = tuple(point.ternary_coords)
+        
+        print(f"DEBUG: Saved {len(self.original_coordinates)} original coordinate sets")
+    
+    def _restore_original_coordinates(self):
+        """Restore original ternary coordinates after disabling clustering."""
+        if not hasattr(self, 'original_coordinates') or not self.original_coordinates:
+            print("DEBUG: No original coordinates saved, regenerating from RGB")
+            # If we don't have saved coordinates, regenerate from RGB
+            self._regenerate_ternary_coordinates()
+            return
+        
+        print("DEBUG: Restoring original coordinates")
+        restored_count = 0
+        
+        for i, point in enumerate(self.color_points):
+            if i in self.original_coordinates:
+                point.ternary_coords = self.original_coordinates[i]
+                restored_count += 1
+        
+        print(f"DEBUG: Restored {restored_count} coordinate sets")
+        
+        # Clear the saved coordinates
+        self.original_coordinates = {}
+    
+    def _regenerate_ternary_coordinates(self):
+        """Regenerate ternary coordinates from RGB values."""
+        if not self.color_points:
+            return
+        
+        print("DEBUG: Regenerating ternary coordinates from RGB values")
+        regenerated_count = 0
+        
+        for point in self.color_points:
+            if hasattr(point, 'rgb') and point.rgb:
+                # Regenerate fresh coordinates from RGB
+                point.ternary_coords = self.ternary_plotter.rgb_to_ternary(point.rgb)
+                regenerated_count += 1
+        
+        print(f"DEBUG: Regenerated {regenerated_count} ternary coordinates")
+    
     def _compute_clusters(self):
         """Compute K-means clusters using the cluster manager."""
         print(f"DEBUG: _compute_clusters called with {len(self.color_points) if self.color_points else 0} color points")
@@ -1141,16 +1205,14 @@ class TernaryPlotWindow:
             
             # Make centroids VERY visible
             self.ax.scatter(centroid_x, centroid_y, c='red', s=300, marker='X', 
-                          edgecolors='black', linewidths=3, zorder=20, alpha=1.0,
-                          label=f'Cluster {label} ({len(points)} pts)')
+                          edgecolors='black', linewidths=3, zorder=20, alpha=1.0)
             
             # Add text label next to centroid
             self.ax.text(centroid_x + 0.02, centroid_y + 0.02, f'C{label}', 
                         fontsize=12, fontweight='bold', color='red', zorder=21)
         
-        print(f"DEBUG: Adding legend for {len(self.clusters)} clusters")
-        # Add legend
-        self.ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.98), fontsize=9)
+        # No legend needed - clusters identified by color in datasheet
+        print(f"DEBUG: Cluster visualization complete - {len(self.clusters)} clusters shown with centroids")
     
     def _toggle_spheres(self):
         """Toggle sphere visualization mode."""
@@ -2830,80 +2892,119 @@ class TernaryPlotWindow:
         try:
             logger.info("Attempting to return to launcher...")
             
-            # Add small delay to ensure window cleanup is complete
+            # Add delay to ensure window cleanup is complete
             import time
-            time.sleep(0.1)
+            time.sleep(0.2)  # Increased delay for better cleanup
             
-            # Import and show the launcher
-            from launch_selector import LaunchSelector
-            
-            # Create and show the launcher
-            selector = LaunchSelector()
-            selected_mode = selector.show()
-            
-            # Clean up the selector window safely
-            try:
-                if hasattr(selector, 'root') and selector.root:
-                    # Check if window still exists before trying to destroy it
-                    if selector.root.winfo_exists():
-                        selector.root.quit()
-                        selector.root.destroy()
-            except Exception as cleanup_error:
-                logger.warning(f"Selector cleanup warning: {cleanup_error}")
-            
-            # Handle the selected mode with protection
-            try:
-                if selected_mode == "full":
-                    logger.info("Launching full StampZ application")
-                    from app import StampZApp
-                    import tkinter as tk
+            # Handle launcher return based on context
+            if self.parent:
+                # Internal mode - close this window and let parent continue
+                logger.info("Internal mode - closing ternary window, returning to main app")
+                try:
+                    if hasattr(self, 'window') and self.window:
+                        self.window.destroy()
+                    # Don't exit the entire application, just return to parent
+                    return
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during internal mode cleanup: {cleanup_error}")
+                    return
+            else:
+                # Standalone mode - return to launcher
+                logger.info("Standalone mode - showing launcher selector")
+                try:
+                    # Import and show the launcher with protection
+                    from launch_selector import LaunchSelector
                     
-                    root = tk.Tk()
-                    app = StampZApp(root)
-                    root.mainloop()
+                    # Create launcher with error handling
+                    selector = LaunchSelector()
+                    selected_mode = selector.show()
                     
-                elif selected_mode == "ternary":
-                    logger.info("Relaunching ternary viewer")
-                    from main import launch_ternary_viewer
-                    launch_ternary_viewer()
+                    # Handle launcher cleanup more safely
+                    try:
+                        if hasattr(selector, 'root') and selector.root:
+                            if hasattr(selector.root, 'winfo_exists'):
+                                try:
+                                    if selector.root.winfo_exists():
+                                        selector.root.quit()
+                                        selector.root.destroy()
+                                except tk.TclError:
+                                    pass  # Window already destroyed
+                    except Exception as cleanup_error:
+                        logger.warning(f"Selector cleanup warning (safe to ignore): {cleanup_error}")
                     
-                elif selected_mode == "plot3d":
-                    logger.info("Launching Plot_3D mode")
-                    from plot3d.standalone_plot3d import main as plot3d_main
-                    plot3d_main()
+                    # Handle the selected mode with better error protection
+                    self._handle_launcher_selection(selected_mode)
                     
-                else:
-                    # User cancelled or chose to exit
-                    logger.info("User cancelled launcher, exiting application")
+                except ImportError as ie:
+                    logger.error(f"Could not import launcher: {ie}")
+                    import sys
+                    sys.exit(0)
+                except Exception as launcher_error:
+                    logger.exception(f"Error with launcher: {launcher_error}")
                     import sys
                     sys.exit(0)
                     
-            except Exception as launch_error:
-                logger.exception(f"Error launching selected mode '{selected_mode}': {launch_error}")
-                # Still exit cleanly if launch fails
-                import sys
-                sys.exit(1)
-                
         except Exception as e:
             logger.exception(f"Critical error in _return_to_launcher: {e}")
-            # If anything fails, exit gracefully
+            # If anything fails, exit gracefully without crashing
             try:
                 import sys
-                logger.info("Performing emergency exit due to launcher failure")
-                sys.exit(1)
+                logger.info("Performing safe exit due to launcher failure")
+                sys.exit(0)  # Use 0 instead of 1 to avoid error appearance
             except:
-                # Last resort
+                # Last resort - silent exit
                 import os
-                os._exit(1)
+                os._exit(0)
+    
+    def _handle_launcher_selection(self, selected_mode):
+        """Handle launcher selection with protection against crashes."""
+        try:
+            if selected_mode == "full":
+                logger.info("Launching full StampZ application")
+                from app import StampZApp
+                import tkinter as tk
+                
+                root = tk.Tk()
+                app = StampZApp(root)
+                root.mainloop()
+                
+            elif selected_mode == "ternary":
+                logger.info("Relaunching ternary viewer")
+                from main import launch_ternary_viewer
+                launch_ternary_viewer()
+                
+            elif selected_mode == "plot3d":
+                logger.info("Launching Plot_3D mode")
+                from plot3d.standalone_plot3d import main as plot3d_main
+                plot3d_main()
+                
+            else:
+                # User cancelled or chose to exit
+                logger.info("User cancelled launcher or chose to exit")
+                import sys
+                sys.exit(0)
+                
+        except Exception as launch_error:
+            logger.exception(f"Error launching selected mode '{selected_mode}': {launch_error}")
+            # Exit cleanly instead of with error code
+            import sys
+            sys.exit(0)
     
     def _exit_application(self):
-        """Exit entire application - only available in standalone mode."""
+        """Exit entire application - works for both internal and standalone modes."""
         try:
+            # Determine appropriate message based on context
+            if self.parent:
+                message = ("Exit the StampZ-III application?\n\n"
+                          "This will close all windows including the main application.\n"
+                          "Make sure you've saved any important work.")
+            else:
+                message = ("Exit the entire StampZ-III application?\n\n"
+                          "This will close all windows and stop all background processes.\n"
+                          "Make sure you've saved any important work.")
+            
             # Double confirmation for full application exit
-            if messagebox.askyesno("Exit Application", 
-                                 "Exit the entire StampZ-III application?\n\n"
-                                 "This will close all windows and stop all background processes.\n"
-                                 "Make sure you've saved any important work."):
+            if messagebox.askyesno("Exit Application", message):
                 
                 # Clean up this window first
                 try:
@@ -2913,20 +3014,44 @@ class TernaryPlotWindow:
                 except Exception as cleanup_error:
                     logger.warning(f"Error during cleanup before exit: {cleanup_error}")
                 
-                # Close any other toplevel windows
-                try:
-                    for widget in self.window.winfo_children():
-                        if isinstance(widget, tk.Toplevel):
-                            widget.destroy()
-                except Exception as window_cleanup_error:
-                    logger.warning(f"Error closing child windows: {window_cleanup_error}")
+                # Handle cleanup based on context
+                if self.parent:
+                    # Internal mode: Clean up properly and close parent application
+                    try:
+                        # Close any child windows
+                        for widget in self.window.winfo_children():
+                            if isinstance(widget, tk.Toplevel):
+                                widget.destroy()
+                        
+                        # Close this window
+                        self.window.destroy()
+                        
+                        # Close parent application if it exists
+                        if hasattr(self.parent, 'quit'):
+                            self.parent.quit()
+                        if hasattr(self.parent, 'destroy'):
+                            self.parent.destroy()
+                            
+                        logger.info("User requested full application exit from internal ternary window")
+                    except Exception as parent_cleanup_error:
+                        logger.warning(f"Error during parent cleanup: {parent_cleanup_error}")
+                else:
+                    # Standalone mode: Direct exit
+                    try:
+                        # Close any child windows
+                        for widget in self.window.winfo_children():
+                            if isinstance(widget, tk.Toplevel):
+                                widget.destroy()
+                    except Exception as window_cleanup_error:
+                        logger.warning(f"Error closing child windows: {window_cleanup_error}")
+                    
+                    # Quit the window
+                    self.window.quit()  # Stop the mainloop
+                    self.window.destroy()  # Destroy the window
+                    
+                    logger.info("User requested full application exit from standalone ternary window")
                 
-                # Forcefully quit the entire application
-                logger.info("User requested full application exit from standalone ternary window")
-                self.window.quit()  # Stop the mainloop
-                self.window.destroy()  # Destroy the window
-                
-                # Force exit if running standalone
+                # Final exit for both modes
                 try:
                     import sys
                     sys.exit(0)
@@ -2943,48 +3068,73 @@ class TernaryPlotWindow:
                 pass
     
     def _on_close(self, return_to_launcher=True):
-        """Handle window close.
+        """Handle window close with improved crash protection.
         
         Args:
             return_to_launcher: If True, return to launcher after closing. If False, just destroy window.
         """
         try:
+            # Prevent multiple close attempts
+            if hasattr(self, '_closing'):
+                return
+            self._closing = True
+            
+            logger.info(f"Window close initiated, return_to_launcher={return_to_launcher}")
+            
             # Clean up datasheet references
-            if self.datasheet_manager.is_datasheet_linked():
-                self.datasheet_manager.close_datasheet()
-                self._hide_datasheet_sync_button()
-                logger.info("Cleaned up datasheet references on window close")
-        except Exception as e:
-            logger.warning(f"Error during cleanup: {e}")
-        
-        # Destroy the window safely
-        try:
-            if hasattr(self, 'window') and self.window:
-                # Check if window still exists before destroying
-                if self.window.winfo_exists():
-                    self.window.destroy()
-                    logger.info("Window destroyed successfully")
-        except Exception as destroy_error:
-            logger.warning(f"Window destruction warning: {destroy_error}")
-        
-        # Return to launcher if requested (and not already in a return-to-launcher flow)
-        if return_to_launcher and not hasattr(self, '_returning_to_launcher'):
-            self._returning_to_launcher = True  # Prevent recursion
             try:
-                logger.info("Window closed via X button, returning to launcher")
-                # Small delay to ensure window cleanup is complete
-                import time
-                time.sleep(0.05)
-                self._return_to_launcher()
+                if hasattr(self, 'datasheet_manager') and self.datasheet_manager.is_datasheet_linked():
+                    self.datasheet_manager.close_datasheet()
+                    if hasattr(self, '_hide_datasheet_sync_button'):
+                        self._hide_datasheet_sync_button()
+                    logger.info("Cleaned up datasheet references on window close")
             except Exception as e:
-                logger.exception(f"Failed to return to launcher from _on_close: {e}")
-                # If launcher fails, just exit
+                logger.warning(f"Error during datasheet cleanup: {e}")
+            
+            # Destroy the window safely with better error handling
+            try:
+                if hasattr(self, 'window') and self.window:
+                    try:
+                        # Check if window still exists before destroying
+                        if hasattr(self.window, 'winfo_exists') and self.window.winfo_exists():
+                            self.window.quit()  # Stop mainloop first
+                            self.window.destroy()  # Then destroy window
+                            logger.info("Window destroyed successfully")
+                    except tk.TclError as tcl_error:
+                        logger.info(f"Window already destroyed: {tcl_error}")
+                    except Exception as destroy_error:
+                        logger.warning(f"Window destruction error: {destroy_error}")
+            except Exception as window_error:
+                logger.warning(f"Window handling error: {window_error}")
+            
+            # Return to launcher if requested (and not already in a return-to-launcher flow)
+            if return_to_launcher and not hasattr(self, '_returning_to_launcher'):
+                self._returning_to_launcher = True  # Prevent recursion
                 try:
-                    import sys
-                    sys.exit(0)
-                except:
-                    import os
-                    os._exit(0)
+                    logger.info("Window closed via X button, returning to launcher")
+                    # Delay to ensure window cleanup is complete
+                    import time
+                    time.sleep(0.1)  # Slightly longer delay
+                    self._return_to_launcher()
+                except Exception as e:
+                    logger.exception(f"Failed to return to launcher from _on_close: {e}")
+                    # If launcher fails, exit gracefully
+                    try:
+                        import sys
+                        sys.exit(0)
+                    except:
+                        import os
+                        os._exit(0)
+        
+        except Exception as close_error:
+            logger.exception(f"Critical error in _on_close: {close_error}")
+            # Emergency exit if all else fails
+            try:
+                import sys
+                sys.exit(0)
+            except:
+                import os
+                os._exit(0)
 
 
 def demo_ternary_window():

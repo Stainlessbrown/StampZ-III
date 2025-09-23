@@ -2,9 +2,9 @@ import tkinter as tk
 from tkinter import ttk
 
 def create_button_frame(parent, on_refresh):
-    """Create a frame with refresh button"""
+    """Create a frame with plot refresh button"""
     button_frame = tk.Frame(parent)
-    refresh_button = tk.Button(button_frame, text='Refresh Data', command=on_refresh)
+    refresh_button = tk.Button(button_frame, text='Refresh Plot', command=on_refresh)
     refresh_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=2)
     return button_frame
 

@@ -5,6 +5,7 @@ Main application window that coordinates all managers and UI components.
 """
 
 import os
+import platform
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -275,12 +276,19 @@ class StampZApp:
                 )
                 return
             
-            # Create selection dialog
+            # Create selection dialog with proper error handling
             dialog = tk.Toplevel(self.root)
             dialog.title("Ternary Color Analysis")
             dialog.geometry("420x420")
-            dialog.transient(self.root)
-            dialog.grab_set()
+            
+            # macOS-safe dialog setup
+            try:
+                if platform.system() != 'Darwin':  # Avoid transient issues on macOS
+                    dialog.transient(self.root)
+                dialog.grab_set()
+            except Exception as dialog_error:
+                logger.warning(f"Dialog setup warning: {dialog_error}")
+                # Continue without modal behavior if grab fails
             
             ttk.Label(dialog, text="Select a sample set for RGB ternary analysis:", font=(None, 11, 'bold')).pack(pady=(12,6))
             
@@ -315,7 +323,11 @@ class StampZApp:
             btns.pack(fill=tk.X, padx=12, pady=12)
             
             def on_cancel():
-                dialog.destroy()
+                try:
+                    dialog.grab_release()  # Release modal state
+                    dialog.destroy()
+                except:
+                    pass  # Ignore cleanup errors
             
             def on_run():
                 selection = listbox.curselection()
@@ -324,7 +336,11 @@ class StampZApp:
                     return
                 selected_set = sample_sets[selection[0]]
                 display_mode = display_var.get()
-                dialog.destroy()
+                try:
+                    dialog.grab_release()  # Release modal state
+                    dialog.destroy()
+                except:
+                    pass  # Ignore cleanup errors
                 self._run_ternary_analysis(
                     selected_set, 
                     show_hull=hull_var.get(),
@@ -428,8 +444,8 @@ class StampZApp:
     def _launch_plot3d_for_sample_set(self, sample_set: str):
         """Launch Plot_3D with the existing database for the sample set."""
         try:
-            # Use existing Plot_3D integration to open the sample set
-            from plot3d.standalone_plot3d import main as plot3d_main
+            # Use direct database launch to ensure correct database is loaded
+            from plot3d.standalone_plot3d import launch_plot3d_with_database
             import threading
             
             # Get the database file path
@@ -440,11 +456,14 @@ class StampZApp:
             if not os.path.exists(db_path):
                 raise Exception(f"Database not found: {db_path}")
             
-            # Launch Plot_3D in a separate thread
+            # Launch Plot_3D with the specific database in a separate thread
             def launch_plot3d():
                 try:
-                    # Let Plot_3D handle the database directly
-                    plot3d_main()
+                    # Launch Plot_3D with specified database directly
+                    # This ensures the correct database is loaded without relying on template selector
+                    success = launch_plot3d_with_database(sample_set)
+                    if not success:
+                        logger.warning(f"Direct database launch failed for: {sample_set}")
                 except Exception as e:
                     logger.warning(f"Plot_3D launch error: {e}")
             

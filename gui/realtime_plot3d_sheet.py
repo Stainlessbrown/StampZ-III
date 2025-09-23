@@ -56,13 +56,14 @@ class RealtimePlot3DSheet:
         'orange', 'purple', 'brown', 'pink', 'lime', 'navy', 'teal', 'gray'
     ]
     
-    def __init__(self, parent, sample_set_name="StampZ_Analysis", load_initial_data=True):
+    def __init__(self, parent, sample_set_name="StampZ_Analysis", display_title=None, load_initial_data=True):
         self.parent = parent
         self.sample_set_name = sample_set_name
+        self.display_title = display_title or sample_set_name  # Use display title if provided, otherwise use sample_set_name
         self.current_file_path = None
         self.plot3d_app = None  # Reference to Plot_3D instance
         
-        print(f"DEBUG: Initializing RealtimePlot3DSheet for {sample_set_name} (load_initial_data={load_initial_data})")
+        print(f"DEBUG: Initializing RealtimePlot3DSheet for database='{sample_set_name}', display='{self.display_title}' (load_initial_data={load_initial_data})")
         
         try:
             self._create_window()
@@ -106,7 +107,7 @@ class RealtimePlot3DSheet:
         print(f"DEBUG: Creating window for {self.sample_set_name}")
         
         self.window = tk.Toplevel(self.parent)
-        self.window.title(f"Plot_3D: {self.sample_set_name} - Normalized Data (0-1 Range)")
+        self.window.title(f"Plot_3D: {self.display_title} - Normalized Data (0-1 Range)")
         self.window.geometry("1400x800")
         
         print("DEBUG: Window created, setting geometry...")
@@ -225,6 +226,15 @@ class RealtimePlot3DSheet:
         # Add keyboard shortcut for manual testing (Cmd+S or Ctrl+S)
         self.sheet.bind('<Control-s>', lambda e: self._debug_manual_save())
         self.sheet.bind('<Command-s>', lambda e: self._debug_manual_save())
+        
+        # Add enhanced delete key handling
+        self.sheet.bind('<Delete>', self._handle_delete_key)
+        self.sheet.bind('<BackSpace>', self._handle_delete_key)
+        
+        # Add right-click context menu
+        self.sheet.bind('<Button-2>', self._show_context_menu)  # macOS right-click
+        self.sheet.bind('<Button-3>', self._show_context_menu)  # Windows/Linux right-click
+        self.sheet.bind('<Control-Button-1>', self._show_context_menu)  # macOS Ctrl+click
         
     def _apply_formatting(self):
         """Apply visual formatting to cells."""
@@ -418,7 +428,7 @@ class RealtimePlot3DSheet:
         toolbar.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         # Create buttons with explicit references
-        self.refresh_btn = ttk.Button(toolbar, text="Refresh from StampZ", command=self._refresh_from_stampz)
+        self.refresh_btn = ttk.Button(toolbar, text="Refresh from StampZ", command=lambda: self._refresh_from_stampz(force_complete_rebuild=False))
         self.refresh_btn.pack(side=tk.LEFT, padx=5)
         
         self.save_btn = ttk.Button(toolbar, text="Save to File", command=self._save_to_file)
@@ -460,7 +470,7 @@ class RealtimePlot3DSheet:
         status_frame = ttk.Frame(toolbar)
         status_frame.pack(side=tk.RIGHT, padx=5)
         
-        ttk.Label(status_frame, text=f"Sample Set: {self.sample_set_name}", font=('Arial', 12, 'bold'), foreground='darkblue').pack(side=tk.TOP, anchor='e')
+        ttk.Label(status_frame, text=f"Sample Set: {self.display_title}", font=('Arial', 12, 'bold'), foreground='darkblue').pack(side=tk.TOP, anchor='e')
         ttk.Label(status_frame, text="Data Format: Normalized (0-1 range)", font=('Arial', 8, 'normal'), foreground='blue').pack(side=tk.TOP, anchor='e')
         
         # Auto-save status
@@ -639,43 +649,61 @@ class RealtimePlot3DSheet:
                         # Simple single-point entries: keep original name clean
                         data_id = image_name
                     
-                    # Get saved Plot_3D data (move BEFORE the debug logging)
-                    saved_marker = measurement.get('marker_preference', '.')
-                    saved_color = measurement.get('color_preference', 'blue')
-                    saved_cluster = measurement.get('cluster_id', '')
-                    saved_delta_e = measurement.get('delta_e', '')
-                    saved_centroid_x = measurement.get('centroid_x', '')
-                    saved_centroid_y = measurement.get('centroid_y', '')
-                    saved_centroid_z = measurement.get('centroid_z', '')
-                    saved_sphere_color = measurement.get('sphere_color', '')
-                    saved_sphere_radius = measurement.get('sphere_radius', '')
-                    
-                    # Debug output removed - marker_preference and color_preference should now be available
-                    
-                    # DEBUG: Show the DataID creation and Plot_3D data restoration for first few measurements
-                    if i < 10:  # Only show first 10 to avoid spam
-                        logger.info(f"DATAID FIX: Measurement {i+1}: image_name='{image_name}', coord_pt={coordinate_point} → DataID='{data_id}'")
-                        logger.info(f"PLOT3D RESTORE: cluster={saved_cluster}, ∆E={saved_delta_e}, marker={saved_marker}, color={saved_color}, sphere={saved_sphere_color}")
-                        if saved_sphere_radius is not None and str(saved_sphere_radius).strip():
-                            logger.info(f"RADIUS DEBUG: Raw radius from DB: '{saved_sphere_radius}' (type: {type(saved_sphere_radius)})")
-                    
-                    # Variables already defined above - no need to redefine
-                    
-                    row = [
-                        round(x_norm, 4),                   # Xnorm  
-                        round(y_norm, 4),                   # Ynorm
-                        round(z_norm, 4),                   # Znorm
-                        data_id,                             # DataID (image_name_ptN format!)
-                        str(saved_cluster) if saved_cluster is not None else '',  # Cluster (restored from DB!)
-                        str(saved_delta_e) if saved_delta_e is not None else '',  # ∆E (restored from DB!)
-                        saved_marker,                        # Marker (restored from DB!)
-                        saved_color,                         # Color (restored from DB!)
-                        str(saved_centroid_x) if saved_centroid_x is not None else '',  # Centroid_X (restored from DB!)
-                        str(saved_centroid_y) if saved_centroid_y is not None else '',  # Centroid_Y (restored from DB!)
-                        str(saved_centroid_z) if saved_centroid_z is not None else '',  # Centroid_Z (restored from DB!)
-                        str(saved_sphere_color) if saved_sphere_color else '',          # Sphere (restored from DB!)
-                        str(saved_sphere_radius) if saved_sphere_radius is not None else ''  # Radius (restored from DB!)
-                    ]
+                    # Handle data population based on refresh type
+                    if should_rebuild:
+                        # COMPLETE REBUILD: Get saved Plot_3D data from database
+                        saved_marker = measurement.get('marker_preference', '.')
+                        saved_color = measurement.get('color_preference', 'blue')
+                        saved_cluster = measurement.get('cluster_id', '')
+                        saved_delta_e = measurement.get('delta_e', '')
+                        saved_centroid_x = measurement.get('centroid_x', '')
+                        saved_centroid_y = measurement.get('centroid_y', '')
+                        saved_centroid_z = measurement.get('centroid_z', '')
+                        saved_sphere_color = measurement.get('sphere_color', '')
+                        saved_sphere_radius = measurement.get('sphere_radius', '')
+                        
+                        # DEBUG: Show the DataID creation and Plot_3D data restoration for first few measurements
+                        if i < 10:  # Only show first 10 to avoid spam
+                            logger.info(f"DATAID FIX: Measurement {i+1}: image_name='{image_name}', coord_pt={coordinate_point} → DataID='{data_id}'")
+                            logger.info(f"PLOT3D RESTORE: cluster={saved_cluster}, ∆E={saved_delta_e}, marker={saved_marker}, color={saved_color}, sphere={saved_sphere_color}")
+                            if saved_sphere_radius is not None and str(saved_sphere_radius).strip():
+                                logger.info(f"RADIUS DEBUG: Raw radius from DB: '{saved_sphere_radius}' (type: {type(saved_sphere_radius)})")
+                        
+                        row = [
+                            round(x_norm, 4),                   # Xnorm  
+                            round(y_norm, 4),                   # Ynorm
+                            round(z_norm, 4),                   # Znorm
+                            data_id,                             # DataID (image_name_ptN format!)
+                            str(saved_cluster) if saved_cluster is not None else '',  # Cluster (restored from DB!)
+                            str(saved_delta_e) if saved_delta_e is not None else '',  # ∆E (restored from DB!)
+                            saved_marker,                        # Marker (restored from DB!)
+                            saved_color,                         # Color (restored from DB!)
+                            str(saved_centroid_x) if saved_centroid_x is not None else '',  # Centroid_X (restored from DB!)
+                            str(saved_centroid_y) if saved_centroid_y is not None else '',  # Centroid_Y (restored from DB!)
+                            str(saved_centroid_z) if saved_centroid_z is not None else '',  # Centroid_Z (restored from DB!)
+                            str(saved_sphere_color) if saved_sphere_color else '',          # Sphere (restored from DB!)
+                            str(saved_sphere_radius) if saved_sphere_radius is not None else ''  # Radius (restored from DB!)
+                        ]
+                    else:
+                        # SMART REFRESH: Only populate coordinates and DataID - let smart refresh preserve user changes
+                        if i < 10:  # Debug output for smart refresh
+                            logger.info(f"SMART REFRESH: Measurement {i+1}: Only updating coords & DataID='{data_id}' - preserving user changes")
+                        
+                        row = [
+                            round(x_norm, 4),                   # Xnorm - from database
+                            round(y_norm, 4),                   # Ynorm - from database
+                            round(z_norm, 4),                   # Znorm - from database
+                            data_id,                             # DataID - from database
+                            '',  # Cluster - will be preserved from current sheet
+                            '',  # ∆E - will be preserved from current sheet
+                            '',  # Marker - will be preserved from current sheet  
+                            '',  # Color - will be preserved from current sheet
+                            '',  # Centroid_X - will be preserved from current sheet
+                            '',  # Centroid_Y - will be preserved from current sheet
+                            '',  # Centroid_Z - will be preserved from current sheet
+                            '',  # Sphere - will be preserved from current sheet
+                            ''   # Radius - will be preserved from current sheet
+                        ]
                     data_rows.append(row)
                     
                 except Exception as row_error:
@@ -755,7 +783,8 @@ class RealtimePlot3DSheet:
                                     if i < 5:
                                         print(f"    Row {row_idx}: Updated coordinates, preserved preferences")
                                         print(f"      Coords: ({db_row[0]:.4f}, {db_row[1]:.4f}, {db_row[2]:.4f})")
-                                        print(f"      Preserved: Marker='{updated_row[6]}', Color='{updated_row[7]}'")
+                                        print(f"      Preserved: Marker='{updated_row[6]}', Color='{updated_row[7]}', Cluster='{updated_row[4]}'")
+                                        print(f"      Sheet had: Marker='{current_row_data[6] if len(current_row_data) > 6 else 'N/A'}', Color='{current_row_data[7] if len(current_row_data) > 7 else 'N/A'}', Cluster='{current_row_data[4] if len(current_row_data) > 4 else 'N/A'}'")
                                     
                                     preserved_count += 1
                                     
@@ -962,6 +991,8 @@ class RealtimePlot3DSheet:
         """
         try:
             print(f"\n💾 COMPREHENSIVE DATABASE SAVE:")
+            print(f"  Database name: '{self.sample_set_name}'")
+            print(f"  Display title: '{self.display_title}'")
             
             # Get current sheet data
             data = self.sheet.get_sheet_data(get_header=False)
@@ -1712,16 +1743,9 @@ class RealtimePlot3DSheet:
             messagebox.showerror("Update Error", f"Failed to update worksheet from Plot_3D: {e}")
     
     def _refresh_plot3d(self):
-        """Refresh Plot_3D with current spreadsheet data."""
+        """Refresh Plot_3D with current spreadsheet data - works in both standalone and internal modes."""
         print("DEBUG: Refresh Plot_3D button clicked")
         try:
-            if not self.plot3d_app:
-                messagebox.showinfo(
-                    "Plot_3D Not Open",
-                    "Please click 'Open in Plot_3D' first to launch the 3D visualization."
-                )
-                return
-            
             # Get current data as DataFrame
             df = self.get_data_as_dataframe()
             
@@ -1745,27 +1769,59 @@ class RealtimePlot3DSheet:
                 print(f"  Row {i}: DataID='{row.get('DataID', 'N/A')}', Marker='{row.get('Marker', 'N/A')}', Color='{row.get('Color', 'N/A')}', Radius='{row.get('Radius', 'N/A')}'")
                 print(f"    Sphere='{row.get('Sphere', 'N/A')}', Centroid_X='{row.get('Centroid_X', 'N/A')}', Centroid_Y='{row.get('Centroid_Y', 'N/A')}', Centroid_Z='{row.get('Centroid_Z', 'N/A')}'")
             
-            # Update Plot_3D with new data
-            print(f"\n⚙️ Updating plot3d_app.df with new DataFrame...")
-            self.plot3d_app.df = df
+            # CASE 1: Connected Plot_3D instance exists (internal mode)
+            if hasattr(self, 'plot3d_app') and self.plot3d_app:
+                print(f"\n📡 CONNECTED MODE: Updating existing Plot_3D instance...")
+                
+                # Update Plot_3D with new data
+                print(f"⚙️ Updating plot3d_app.df with new DataFrame...")
+                self.plot3d_app.df = df
+                
+                # Refresh the plot
+                if hasattr(self.plot3d_app, 'refresh_plot'):
+                    print(f"🔄 Calling plot3d_app.refresh_plot()...")
+                    self.plot3d_app.refresh_plot()
+                    logger.info(f"Refreshed connected Plot_3D with {len(df)} data points")
+                    print(f"✅ Connected Plot_3D refresh completed successfully")
+                    messagebox.showinfo(
+                        "Plot_3D Refreshed",
+                        f"✅ Updated connected Plot_3D with {len(df)} data points from spreadsheet!\n\n"
+                        f"Check Plot_3D window to verify changes are visible."
+                    )
+                else:
+                    print(f"❌ Connected Plot_3D refresh method not available")
+                    messagebox.showwarning(
+                        "Refresh Not Available",
+                        "Plot_3D refresh method not available. Please restart Plot_3D."
+                    )
             
-            # Refresh the plot
-            if hasattr(self.plot3d_app, 'refresh_plot'):
-                print(f"🔄 Calling plot3d_app.refresh_plot()...")
-                self.plot3d_app.refresh_plot()
-                logger.info(f"Refreshed Plot_3D with {len(df)} data points")
-                print(f"✅ Plot_3D refresh completed successfully")
-                messagebox.showinfo(
-                    "Plot_3D Refreshed",
-                    f"✅ Updated Plot_3D with {len(df)} data points from spreadsheet!\n\n"
-                    f"Check Plot_3D window to verify changes are visible."
-                )
+            # CASE 2: No connected instance (standalone mode) - refresh datasheet from database
             else:
-                print(f"❌ Plot_3D refresh method not available")
-                messagebox.showwarning(
-                    "Refresh Not Available",
-                    "Plot_3D refresh method not available. Please restart Plot_3D."
-                )
+                print(f"\n🔄 STANDALONE MODE: Refreshing datasheet from database...")
+                
+                try:
+                    # Refresh the datasheet data from the database
+                    self._refresh_from_stampz(force_complete_rebuild=False)
+                    
+                    messagebox.showinfo(
+                        "Datasheet Refreshed",
+                        f"✅ Refreshed datasheet from database: {self.sample_set_name}\n\n"
+                        f"Updated with latest analysis results including:\n"
+                        f"• K-means cluster assignments\n"
+                        f"• ΔE calculations\n"
+                        f"• Centroid coordinates\n"
+                        f"• Color and marker preferences\n\n"
+                        f"Note: If you have a separate Plot_3D window open,\n"
+                        f"use its '🔄 Refresh Data' button to reload there as well."
+                    )
+                    
+                except Exception as refresh_error:
+                    print(f"❌ Error refreshing datasheet from database: {refresh_error}")
+                    messagebox.showerror(
+                        "Refresh Error", 
+                        f"Failed to refresh datasheet from database:\n\n{refresh_error}\n\n"
+                        f"Try using 'Refresh from StampZ' button instead."
+                    )
                 
         except Exception as e:
             logger.error(f"Error refreshing Plot_3D: {e}")
@@ -2411,7 +2467,307 @@ class RealtimePlot3DSheet:
             
         except Exception as e:
             logger.error(f"Error populating new worksheet: {e}")
-            raise
+    
+    def _handle_delete_key(self, event):
+        """Handle Delete or Backspace key press to clear selected cells."""
+        try:
+            # Get currently selected cells
+            selection = self.sheet.get_currently_selected()
+            
+            if not selection:
+                return 'break'  # Prevent default behavior if no selection
+            
+            # Determine what type of selection we have
+            if selection.type_ == "cells":
+                # Cell selection - clear specific cells
+                cells_cleared = self._clear_selected_cells(selection)
+                self._update_status(f"Cleared {cells_cleared} cells")
+                
+            elif selection.type_ == "rows":
+                # Row selection - clear entire rows
+                rows_cleared = self._clear_selected_rows(selection)
+                self._update_status(f"Cleared {rows_cleared} rows")
+                
+            elif selection.type_ == "columns":
+                # Column selection - clear entire columns
+                cols_cleared = self._clear_selected_columns(selection)
+                self._update_status(f"Cleared {cols_cleared} columns")
+            
+            # Trigger auto-save after clearing
+            self._auto_save_changes()
+            
+            print(f"DEBUG: Delete key handled - cleared selection type: {selection.type_}")
+            
+            return 'break'  # Prevent default tksheet delete behavior
+            
+        except Exception as e:
+            print(f"DEBUG: Error handling delete key: {e}")
+            logger.warning(f"Error handling delete key: {e}")
+            return None  # Let default behavior proceed on error
+    
+    def _clear_selected_cells(self, selection):
+        """Clear contents of selected cells."""
+        cells_cleared = 0
+        
+        try:
+            for row, col in selection.cells:
+                # Get current value to check if it's protected
+                if self._is_cell_protected(row, col):
+                    continue  # Skip protected cells
+                
+                # Clear the cell
+                self.sheet.set_cell_data(row, col, '')
+                cells_cleared += 1
+                
+                print(f"DEBUG: Cleared cell [{row}, {col}]")
+        
+        except Exception as e:
+            print(f"DEBUG: Error clearing cells: {e}")
+            logger.warning(f"Error clearing selected cells: {e}")
+        
+        return cells_cleared
+    
+    def _clear_selected_rows(self, selection):
+        """Clear contents of selected rows (excluding protected areas)."""
+        rows_cleared = 0
+        
+        try:
+            for row in selection.rows:
+                # Skip header row
+                if row == 0:
+                    continue
+                
+                # Clear all editable columns in the row
+                for col in range(len(self.PLOT3D_COLUMNS)):
+                    if self._is_cell_protected(row, col):
+                        continue  # Skip protected cells
+                    
+                    self.sheet.set_cell_data(row, col, '')
+                
+                rows_cleared += 1
+                print(f"DEBUG: Cleared row {row}")
+        
+        except Exception as e:
+            print(f"DEBUG: Error clearing rows: {e}")
+            logger.warning(f"Error clearing selected rows: {e}")
+        
+        return rows_cleared
+    
+    def _clear_selected_columns(self, selection):
+        """Clear contents of selected columns (excluding protected areas)."""
+        cols_cleared = 0
+        
+        try:
+            total_rows = self.sheet.get_total_rows()
+            
+            for col in selection.columns:
+                # Skip invalid columns
+                if col >= len(self.PLOT3D_COLUMNS):
+                    continue
+                
+                # Clear all editable rows in the column
+                for row in range(1, total_rows):  # Skip header row (0)
+                    if self._is_cell_protected(row, col):
+                        continue  # Skip protected cells
+                    
+                    self.sheet.set_cell_data(row, col, '')
+                
+                cols_cleared += 1
+                col_name = self.PLOT3D_COLUMNS[col] if col < len(self.PLOT3D_COLUMNS) else f"Col_{col}"
+                print(f"DEBUG: Cleared column {col} ({col_name})")
+        
+        except Exception as e:
+            print(f"DEBUG: Error clearing columns: {e}")
+            logger.warning(f"Error clearing selected columns: {e}")
+        
+        return cols_cleared
+    
+    def _is_cell_protected(self, row, col):
+        """Check if a cell is in a protected area that shouldn't be cleared."""
+        # Protect the header row
+        if row == 0:
+            return True
+        
+        # Protect the centroid area (rows 1-6, columns A-H)
+        if 1 <= row <= 6 and 0 <= col <= 7:  # Rows 2-7 in display, columns A-H
+            return True
+        
+        return False
+    
+    def _show_context_menu(self, event):
+        """Show right-click context menu for additional clearing options."""
+        try:
+            # Create context menu
+            context_menu = tk.Menu(self.window, tearoff=0)
+            
+            # Get current selection
+            selection = self.sheet.get_currently_selected()
+            
+            if selection and selection.cells:
+                context_menu.add_command(
+                    label=f"Clear Selected Cells ({len(selection.cells)})",
+                    command=lambda: self._clear_cells_from_menu(selection)
+                )
+                context_menu.add_separator()
+            
+            if selection and selection.rows:
+                context_menu.add_command(
+                    label=f"Clear Selected Rows ({len(selection.rows)})",
+                    command=lambda: self._clear_rows_from_menu(selection)
+                )
+                context_menu.add_separator()
+            
+            if selection and selection.columns:
+                context_menu.add_command(
+                    label=f"Clear Selected Columns ({len(selection.columns)})",
+                    command=lambda: self._clear_columns_from_menu(selection)
+                )
+                context_menu.add_separator()
+            
+            # Always available options
+            context_menu.add_command(
+                label="Clear Current Cell",
+                command=self._clear_current_cell
+            )
+            
+            context_menu.add_separator()
+            
+            context_menu.add_command(
+                label="Clear Data Area (Rows 8+)",
+                command=self._clear_data_area
+            )
+            
+            context_menu.add_command(
+                label="Clear All Editable Cells",
+                command=self._clear_all_editable
+            )
+            
+            # Show the menu at the mouse position
+            context_menu.tk_popup(event.x_root, event.y_root)
+            
+        except Exception as e:
+            print(f"DEBUG: Error showing context menu: {e}")
+            logger.warning(f"Error showing context menu: {e}")
+        finally:
+            # Clean up menu
+            try:
+                context_menu.destroy()
+            except:
+                pass
+    
+    def _clear_cells_from_menu(self, selection):
+        """Clear cells from context menu selection."""
+        cells_cleared = self._clear_selected_cells(selection)
+        self._update_status(f"Cleared {cells_cleared} cells from context menu")
+        self._auto_save_changes()
+    
+    def _clear_rows_from_menu(self, selection):
+        """Clear rows from context menu selection."""
+        rows_cleared = self._clear_selected_rows(selection)
+        self._update_status(f"Cleared {rows_cleared} rows from context menu")
+        self._auto_save_changes()
+    
+    def _clear_columns_from_menu(self, selection):
+        """Clear columns from context menu selection."""
+        cols_cleared = self._clear_selected_columns(selection)
+        self._update_status(f"Cleared {cols_cleared} columns from context menu")
+        self._auto_save_changes()
+    
+    def _clear_current_cell(self):
+        """Clear the currently active cell."""
+        try:
+            # Get the currently selected cell
+            row, col = self.sheet.get_currently_selected_cell()
+            
+            if row is not None and col is not None:
+                if self._is_cell_protected(row, col):
+                    self._update_status("Cannot clear protected cell")
+                    return
+                
+                self.sheet.set_cell_data(row, col, '')
+                self._update_status(f"Cleared cell [{row}, {col}]")
+                self._auto_save_changes()
+                print(f"DEBUG: Cleared current cell [{row}, {col}]")
+            else:
+                self._update_status("No cell selected")
+                
+        except Exception as e:
+            print(f"DEBUG: Error clearing current cell: {e}")
+            logger.warning(f"Error clearing current cell: {e}")
+            self._update_status("Error clearing current cell")
+    
+    def _clear_data_area(self):
+        """Clear all data in the data area (rows 8+ in display, rows 7+ in 0-based indexing)."""
+        try:
+            # Ask for confirmation
+            result = messagebox.askyesno(
+                "Clear Data Area",
+                "This will clear all data in rows 8 and below (individual data points).\n\n"
+                "Centroid data in rows 2-7 will be preserved.\n\n"
+                "Are you sure?"
+            )
+            
+            if not result:
+                return
+            
+            total_rows = self.sheet.get_total_rows()
+            cells_cleared = 0
+            
+            # Clear rows 7+ (display rows 8+)
+            for row in range(7, total_rows):
+                for col in range(len(self.PLOT3D_COLUMNS)):
+                    self.sheet.set_cell_data(row, col, '')
+                    cells_cleared += 1
+            
+            self._update_status(f"Cleared data area: {cells_cleared} cells in rows 8+")
+            self._auto_save_changes()
+            print(f"DEBUG: Cleared data area - {cells_cleared} cells")
+            
+        except Exception as e:
+            print(f"DEBUG: Error clearing data area: {e}")
+            logger.warning(f"Error clearing data area: {e}")
+            messagebox.showerror("Error", f"Failed to clear data area: {e}")
+    
+    def _clear_all_editable(self):
+        """Clear all editable cells (excluding protected header and centroid areas)."""
+        try:
+            # Ask for confirmation
+            result = messagebox.askyesno(
+                "Clear All Editable Cells",
+                "This will clear ALL editable cells in the spreadsheet.\n\n"
+                "The header row and centroid area (rows 2-7, columns A-H) will be preserved.\n\n"
+                "Are you SURE you want to do this?"
+            )
+            
+            if not result:
+                return
+            
+            total_rows = self.sheet.get_total_rows()
+            cells_cleared = 0
+            
+            for row in range(1, total_rows):  # Skip header row (0)
+                for col in range(len(self.PLOT3D_COLUMNS)):
+                    if not self._is_cell_protected(row, col):
+                        self.sheet.set_cell_data(row, col, '')
+                        cells_cleared += 1
+            
+            self._update_status(f"Cleared all editable cells: {cells_cleared} cells")
+            self._auto_save_changes()
+            print(f"DEBUG: Cleared all editable cells - {cells_cleared} cells")
+            
+        except Exception as e:
+            print(f"DEBUG: Error clearing all editable cells: {e}")
+            logger.warning(f"Error clearing all editable cells: {e}")
+            messagebox.showerror("Error", f"Failed to clear all editable cells: {e}")
+    
+    def _update_status(self, message):
+        """Update status message if status bar exists."""
+        if hasattr(self, 'auto_save_status'):
+            original_color = self.auto_save_status.cget('foreground')
+            self.auto_save_status.config(text=message, foreground='blue')
+            # Reset color after 3 seconds
+            self.window.after(3000, lambda: self.auto_save_status.config(foreground=original_color))
+        print(f"STATUS: {message}")
     
     def _import_external_data(self, importer, file_path):
         """Helper method to import external data using the importer.
@@ -2720,6 +3076,100 @@ class RealtimePlot3DSheet:
                 f"Please try again or check the terminal for detailed error messages."
             )
             print(f"❌ Manual database save failed: {e}")
+    
+    def populate_with_dataframe(self, df):
+        """Populate the datasheet with Plot_3D DataFrame data.
+        
+        Args:
+            df: Plot_3D DataFrame with columns like Xnorm, Ynorm, Znorm, DataID, etc.
+        """
+        try:
+            print(f"\n📊 POPULATING DATASHEET with DataFrame ({len(df)} rows)")
+            
+            if df is None or len(df) == 0:
+                print("  No data to populate - DataFrame is empty")
+                return
+                
+            # Calculate required rows: header + reserved (rows 2-7) + data + buffer
+            data_rows = len(df)
+            total_rows = 7 + data_rows + 10  # 1 header + 6 reserved + data + 10 buffer
+            
+            # Create complete sheet structure with proper layout
+            sheet_data = []
+            
+            # Row 1: Headers (index 0)
+            sheet_data.append(self.PLOT3D_COLUMNS)
+            
+            # Rows 2-7: Reserved for K-means (indices 1-6) - empty but formatted pink
+            for i in range(6):  # 6 rows (2-7)
+                sheet_data.append([''] * len(self.PLOT3D_COLUMNS))
+            
+            # Rows 8+: Data rows (index 7+)
+            for idx, row in df.iterrows():
+                sheet_row = []
+                
+                # Map DataFrame columns to sheet columns
+                for col in self.PLOT3D_COLUMNS:
+                    if col in df.columns:
+                        value = row[col]
+                        # Handle NaN values
+                        if pd.isna(value):
+                            sheet_row.append('')
+                        elif isinstance(value, (int, float)):
+                            # Format numeric values to 4 decimal places (except Cluster which should be integer)
+                            if col == 'Cluster':
+                                # Keep clusters as integers
+                                sheet_row.append(int(value) if not pd.isna(value) else '')
+                            else:
+                                # All other numeric values get 4 decimal places
+                                sheet_row.append(f"{float(value):.4f}")
+                        else:
+                            # Non-numeric values (strings, DataID, etc.)
+                            sheet_row.append(str(value))
+                    else:
+                        sheet_row.append('')  # Empty if column doesn't exist
+                
+                sheet_data.append(sheet_row)
+                
+                # Debug first few rows
+                if idx < 5:
+                    print(f"    Data Row {idx+8}: DataID={row.get('DataID', 'N/A')}, Xnorm={row.get('Xnorm', 'N/A')}")
+            
+            # Add buffer rows
+            for i in range(10):
+                sheet_data.append([''] * len(self.PLOT3D_COLUMNS))
+            
+            # Clear sheet and populate with structured data
+            self.sheet.set_sheet_data(sheet_data)
+            
+            print(f"  📋 Created sheet structure: 1 header + 6 reserved + {data_rows} data + 10 buffer = {len(sheet_data)} total rows")
+            
+            # Reapply formatting after data insertion
+            self._apply_formatting()
+            
+            # Recreate validation dropdowns after population (they get lost when data is repopulated)
+            print("  🔄 Setting up validation dropdowns after population...")
+            self._setup_validation()
+            
+            # Force refresh the display
+            self.sheet.refresh()
+            
+            print(f"  ✅ Successfully populated datasheet with proper structure and validation")
+            
+            # Show success message to user without modal dialog (prevents dialog behind sheet issue)
+            print(f"  💬 Datasheet populated: {len(df)} data points loaded into rows 8+")
+            print(f"     Rows 1: Headers")
+            print(f"     Rows 2-7: Reserved for K-means (pink formatting)")
+            print(f"     Rows 8+: Your data points")
+            
+        except Exception as e:
+            print(f"  ❌ Error populating datasheet: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror(
+                "Population Error",
+                f"Failed to populate datasheet with DataFrame data:\n\n{e}"
+            )
     
     def _on_window_close(self):
         """Handle window close event."""

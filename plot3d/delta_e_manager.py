@@ -142,6 +142,91 @@ class DeltaEManager:
         
         self.data = dataframe_copy
         self.logger.info(f"Loaded DataFrame with {len(dataframe_copy)} rows")
+    
+    def _calculate_delta_e_database_mode(self, start_row: int, end_row: int):
+        """Calculate Delta E values for database mode (in memory only, no file operations)."""
+        try:
+            self.logger.info(f"Starting database mode Delta E calculation for rows {start_row}-{end_row}")
+            
+            # Validate row range
+            start_row, end_row = self.validate_row_range(start_row, end_row)
+            row_indices = list(self._get_row_indices(start_row, end_row))
+            
+            # Get data for selected range
+            subset_data = self.data.iloc[row_indices].copy()
+            
+            # Check for cluster assignments
+            clusters = subset_data['Cluster']
+            valid_clusters = clusters[clusters.notna()]
+            
+            if valid_clusters.empty:
+                raise ValueError("No cluster assignments found. Please run K-means clustering first.")
+            
+            # Get unique clusters
+            unique_clusters = valid_clusters.unique()
+            self.logger.info(f"Found {len(unique_clusters)} unique clusters: {unique_clusters}")
+            
+            # Calculate centroids for each cluster from the current data
+            centroids = {}
+            for cluster in unique_clusters:
+                cluster_data = subset_data[subset_data['Cluster'] == cluster]
+                if len(cluster_data) > 0:
+                    centroid_x = cluster_data['Xnorm'].mean()
+                    centroid_y = cluster_data['Ynorm'].mean() 
+                    centroid_z = cluster_data['Znorm'].mean()
+                    centroids[cluster] = (centroid_x, centroid_y, centroid_z)
+                    self.logger.info(f"Cluster {cluster} centroid: ({centroid_x:.4f}, {centroid_y:.4f}, {centroid_z:.4f})")
+            
+            # Calculate Delta E for each point
+            calculated_count = 0
+            for idx in row_indices:
+                row_data = self.data.iloc[idx]
+                cluster = row_data['Cluster']
+                
+                if pd.notna(cluster) and cluster in centroids:
+                    # Get point coordinates
+                    point_x = row_data['Xnorm']
+                    point_y = row_data['Ynorm']
+                    point_z = row_data['Znorm']
+                    
+                    # Get centroid coordinates
+                    centroid_x, centroid_y, centroid_z = centroids[cluster]
+                    
+                    # Convert normalized coordinates to Lab
+                    point_lab = self.xyz_to_lab(point_x, point_y, point_z)
+                    centroid_lab = self.xyz_to_lab(centroid_x, centroid_y, centroid_z)
+                    
+                    # Calculate Delta E
+                    delta_e = self.calculate_delta_e_2000(point_lab, centroid_lab)
+                    
+                    # Round to 4 decimal places for consistency
+                    delta_e = round(delta_e, 4)
+                    
+                    # Update the data in memory
+                    self.data.iloc[idx, self.data.columns.get_loc('∆E')] = delta_e
+                    calculated_count += 1
+                    
+                    self.logger.debug(f"Point {row_data['DataID']}: ∆E = {delta_e:.4f}")
+            
+            self.logger.info(f"Successfully calculated ∆E for {calculated_count} points in database mode")
+            
+            # Notify parent of data update
+            if self.on_data_update:
+                self.on_data_update(self.data)
+                self.logger.info("Notified parent of data update")
+            
+            # Show success message
+            messagebox.showinfo(
+                "∆E Calculation Complete",
+                f"Successfully calculated ∆E values for {calculated_count} points.\n\n"
+                f"Results are available in the plot and datasheet.\n"
+                f"Note: In database mode, results are stored in memory only."
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in database mode Delta E calculation: {str(e)}")
+            messagebox.showerror("∆E Calculation Error", f"Failed to calculate ∆E values:\n\n{str(e)}")
+            raise
     def set_file_path(self, file_path: str):
         """Set the current file path."""
         if not file_path:
@@ -634,7 +719,9 @@ class DeltaEManager:
         lockfile = None
         try:
             if self.file_path is None:
-                raise ValueError("No file path set")
+                # Database mode - calculate Delta E but don't save to file
+                self.logger.info("Database mode: calculating Delta E values in memory only")
+                return self._calculate_delta_e_database_mode(start_row, end_row)
                 
             # Check if file exists and is accessible
             if not os.path.exists(self.file_path):
@@ -852,8 +939,8 @@ class DeltaEManager:
                                 # 10-50: Colors are more similar than opposite
                                 # 50+: Colors are very different
                                 
-                                # Round to 2 decimal places
-                                delta_e = round(delta_e, 2)
+                                # Round to 4 decimal places for consistency
+                                delta_e = round(delta_e, 4)
                                 
                                 # Validate the calculated value
                                 if pd.isna(delta_e) or delta_e < 0:
@@ -866,7 +953,7 @@ class DeltaEManager:
                                     self.logger.warning(f"Unusually large Delta E value calculated: {delta_e} for point at index {i}")
                                     # But still use the value as it could be valid for very different colors
                                     
-                                self.logger.debug(f"  Calculated Delta E: {delta_e}")
+                                self.logger.debug(f"  Calculated Delta E: {delta_e:.4f}")
                                 
                             except Exception as e:
                                 self.logger.error(f"Error calculating Delta E: {str(e)}")

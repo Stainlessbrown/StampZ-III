@@ -81,5 +81,72 @@ def main(auto_load_file=None):
         sys.exit(1)
 
 
+def launch_plot3d_with_database(database_name):
+    """Launch Plot_3D directly with a specific database without showing dialog.
+    
+    Args:
+        database_name (str): Name of the database/sample set to load
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        print(f"\n🚀 DIRECT DATABASE LAUNCH: {database_name}")
+        
+        # Verify database exists
+        from utils.color_data_bridge import ColorDataBridge
+        bridge = ColorDataBridge()
+        
+        sample_sets = bridge.get_available_sample_sets()
+        if database_name not in sample_sets:
+            print(f"❌ Database not found: {database_name}")
+            print(f"Available databases: {sample_sets}")
+            return False
+        
+        print(f"✅ Database found: {database_name}")
+        
+        # Launch Plot_3D with the specific database
+        from plot3d.Plot_3D import Plot3DApp
+        import threading
+        import tkinter as tk
+        
+        def launch_with_db():
+            try:
+                # Create root window if needed (for threading)
+                if not hasattr(tk, '_default_root') or tk._default_root is None:
+                    root = tk.Tk()
+                    root.withdraw()  # Hide the root window initially
+                else:
+                    root = None
+                
+                # Create Plot_3D app with database
+                app = Plot3DApp(
+                    sample_set_name=database_name
+                )
+                
+                print(f"✅ Successfully launched Plot_3D with database: {database_name}")
+                
+                # If we created a root, start mainloop
+                if root:
+                    root.mainloop()
+                    
+            except Exception as e:
+                print(f"❌ Error launching Plot_3D with database: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Launch in separate thread to avoid blocking
+        thread = threading.Thread(target=launch_with_db, daemon=False)  # Don't use daemon for main app
+        thread.start()
+        
+        print(f"✅ Plot_3D launch thread started for database: {database_name}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to launch Plot_3D with database {database_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 if __name__ == "__main__":
     main()

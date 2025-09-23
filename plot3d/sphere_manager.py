@@ -63,13 +63,25 @@ class SphereManager:
         """Remove all sphere objects from the plot."""
         try:
             # Remove all sphere objects from the plot
+            # 3D surface objects from plot_surface() are stored differently than regular collections
+            sphere_count_before = len(self.sphere_objects)
             for sphere in self.sphere_objects:
-                if sphere in self.ax.collections:
+                try:
+                    # Try to remove the sphere surface object
                     sphere.remove()
+                except (ValueError, AttributeError) as e:
+                    # If direct removal fails, try to remove from collections
+                    if sphere in self.ax.collections:
+                        self.ax.collections.remove(sphere)
+                    elif hasattr(sphere, '_remove_method'):
+                        # Some matplotlib objects have custom removal methods
+                        sphere._remove_method()
+                except Exception as e:
+                    self.logger.warning(f"Could not remove sphere object: {e}")
             
             # Clear the list of sphere objects
             self.sphere_objects = []
-            self.logger.info(f"Cleared {len(self.sphere_objects)} sphere objects from plot")
+            self.logger.info(f"Cleared {sphere_count_before} sphere objects from plot")
         except Exception as e:
             self.logger.error(f"Error clearing spheres: {str(e)}")
             import traceback
@@ -124,10 +136,21 @@ class SphereManager:
             List of color codes that are actually present in the dataset
         """
         try:
-            # Get unique sphere color names from the data
-            colors = self.data_df['Sphere'].dropna().unique()
+            # Get unique sphere data and parse color names
+            sphere_data = self.data_df['Sphere'].dropna().unique()
+            color_names = set()
+            
+            for sphere_str in sphere_data:
+                if '/' in str(sphere_str):
+                    # Format: "color/radius" - extract color part
+                    color_name = str(sphere_str).split('/')[0].strip()
+                else:
+                    # Format: just "color"
+                    color_name = str(sphere_str).strip()
+                color_names.add(color_name)
+            
             # Convert to color codes
-            active_colors = [self._get_color(str(c)) for c in colors]
+            active_colors = [self._get_color(color_name) for color_name in color_names]
             return active_colors
         except Exception as e:
             self.logger.error(f"Error getting active colors: {str(e)}")
@@ -215,7 +238,11 @@ class SphereManager:
                     print(f"  Row {idx}: DataID={data_id}, Sphere='{sphere_val}', Radius='{radius_val}' (type: {type(radius_val)})")
                     # Extra debug for radius conversion
                     if pd.notna(radius_val):
-                        print(f"    Radius is NOT NaN - will use: {float(radius_val)}")
+                        try:
+                            radius_float = float(radius_val)
+                            print(f"    Radius is NOT NaN - will use: {radius_float}")
+                        except (ValueError, TypeError):
+                            print(f"    Radius '{radius_val}' is not convertible to float - using default: {self.DEFAULT_RADIUS}")
                     else:
                         print(f"    Radius IS NaN - will use default: {self.DEFAULT_RADIUS}")
             
@@ -224,36 +251,70 @@ class SphereManager:
                 print("DEBUG: No valid centroid data found for sphere rendering")
                 return
             
-            # Process each point with valid centroid coordinates
-            sphere_count = 0
+            # Group by unique centroid positions to avoid duplicate spheres
+            # Multiple data points can share the same centroid (same cluster), but we only want one sphere per position
+            unique_centroids = {}
+            
             for idx, row in centroid_data.iterrows():
+                # Create a key from centroid coordinates (rounded to avoid floating point issues)
+                centroid_key = (
+                    round(float(row['Centroid_X']), 6),
+                    round(float(row['Centroid_Y']), 6), 
+                    round(float(row['Centroid_Z']), 6)
+                )
+                
+                # Only keep the first occurrence of each unique centroid position
+                if centroid_key not in unique_centroids:
+                    unique_centroids[centroid_key] = row
+            
+            print(f"DEBUG: Reduced {len(centroid_data)} rows to {len(unique_centroids)} unique centroid positions")
+            
+            # Process each unique centroid position
+            sphere_count = 0
+            for centroid_key, row in unique_centroids.items():
                 try:
-                    # Get color and check visibility
-                    color_name = row.get('Sphere')
-                    color = self._get_color(str(color_name) if pd.notna(color_name) else 'gray')
+                    # Parse sphere data which can be in format "color/radius" or just "color"
+                    sphere_data = row.get('Sphere')
+                    if pd.notna(sphere_data):
+                        sphere_str = str(sphere_data).strip()
+                        if '/' in sphere_str:
+                            # Format: "color/radius"
+                            parts = sphere_str.split('/')
+                            color_name = parts[0].strip()
+                            try:
+                                radius = float(parts[1].strip())
+                            except (ValueError, IndexError):
+                                radius = self.DEFAULT_RADIUS
+                                self.logger.warning(f"Invalid radius in sphere data '{sphere_str}', using default")
+                        else:
+                            # Format: just "color"
+                            color_name = sphere_str
+                            radius = self.DEFAULT_RADIUS
+                    else:
+                        # No sphere data
+                        color_name = 'gray'
+                        radius = self.DEFAULT_RADIUS
+                    
+                    # Get color code and check visibility
+                    color = self._get_color(color_name)
                     
                     # Skip if sphere color is not visible
                     if not self.visibility_states.get(color, True):
                         continue
                         
-                    # Get radius from Radius column or use default
-                    radius = row.get('Radius', self.DEFAULT_RADIUS)
-                    try:
-                        radius = float(radius)
-                        # Ensure radius is positive, use default if not
-                        if not (radius > 0):
-                            self.logger.warning(f"Invalid radius value {radius} at index {idx}, using default")
-                            radius = self.DEFAULT_RADIUS
-                    except (ValueError, TypeError):
-                        self.logger.warning(f"Invalid radius value at index {idx}, using default")
+                    # Ensure radius is positive
+                    if not (radius > 0):
+                        self.logger.warning(f"Invalid radius value {radius}, using default")
                         radius = self.DEFAULT_RADIUS
                     
-                    # Get coordinates
+                    # Use the exact centroid coordinates (not rounded)
                     center = (
                         float(row['Centroid_X']), 
                         float(row['Centroid_Y']), 
                         float(row['Centroid_Z'])
                     )
+                    
+                    print(f"DEBUG: Rendering sphere at {center} with color {color} and radius {radius}")
                     
                     # Create sphere mesh with variable radius
                     x, y, z = self._create_sphere_mesh(center, radius)
@@ -272,14 +333,13 @@ class SphereManager:
                     sphere_count += 1
                     
                 except Exception as e:
-                    self.logger.warning(f"Error rendering sphere at index {idx}: {str(e)}")
+                    self.logger.warning(f"Error rendering sphere at position {centroid_key}: {str(e)}")
                     continue
             
             self.logger.info(f"Successfully rendered {sphere_count} visible spheres")
             print(f"DEBUG: Successfully rendered {sphere_count} visible spheres")
             
-            # Refresh the canvas
-            self.canvas.draw()
+            # Note: Canvas draw is handled by the main refresh_plot method to avoid conflicts
             
         except Exception as e:
             self.logger.error(f"Error rendering spheres: {str(e)}")

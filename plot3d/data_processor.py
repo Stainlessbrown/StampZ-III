@@ -89,6 +89,7 @@ def process_dataframe(df):
             'Marker': '.',  # Changed from 'M' to 'Marker'
             'Color': None,  # We'll set this after DataID is established
             'Sphere': None,  # We'll set this after DataID is established
+            '∆E': float('nan'),  # Required for K-means and Delta E managers
             'valid_data': False   # Added flag to identify valid data points vs empty rows
         }
         def get_initial_color(data_id):

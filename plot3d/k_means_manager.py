@@ -454,39 +454,27 @@ class KmeansManager:
                 problematic_indices = [idx for idx in clean_indices if pd.isna(df_copy.iloc[idx]["Cluster"])]
                 self.logger.warning(f"Rows without assignments: {problematic_indices}")
             
-            # Update the centroid coordinates (X, Y, Z) for each point based on its cluster
-            for i, idx in enumerate(clean_indices):
-                cluster_idx = int(formatted_clusters[i])
-                centroid = centroid_map[cluster_idx]
-                
-                # Update Centroid_X/Y/Z columns with the centroid coordinates
-                df_copy.at[idx, 'Centroid_X'] = centroid[0]  # Xnorm coordinate of centroid
-                df_copy.at[idx, 'Centroid_Y'] = centroid[1]  # Ynorm coordinate of centroid
-                df_copy.at[idx, 'Centroid_Z'] = centroid[2]  # Znorm coordinate of centroid
-                
-                # Validate centroid assignment
-                if (pd.isna(df_copy.at[idx, 'Centroid_X']) or 
-                    pd.isna(df_copy.at[idx, 'Centroid_Y']) or 
-                    pd.isna(df_copy.at[idx, 'Centroid_Z'])):
-                    point_id = df_copy.at[idx, 'DataID'] if 'DataID' in df_copy.columns else f"row {idx}"
-                    self.logger.error(f"NaN values in centroid coordinates for {point_id} in cluster {cluster_idx}")
-                    self.logger.error(f"Centroid: {centroid}, Centroid_X={df_copy.at[idx, 'Centroid_X']}, Centroid_Y={df_copy.at[idx, 'Centroid_Y']}, Centroid_Z={df_copy.at[idx, 'Centroid_Z']}")
-                    raise ValueError(f"Invalid centroid values assigned to {point_id}")
+            # FIXED: Do NOT automatically assign centroid coordinates to individual data points
+            # Individual data points should only receive cluster assignments
+            # Centroid coordinates should only be stored in dedicated centroid rows by the datasheet
             
-            print("\nDebug: Updated centroid coordinates:")
-            print(df_copy.iloc[clean_indices[:5]][['DataID', 'Cluster', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']].to_string())
-            print(df_copy.iloc[clean_indices][['DataID', 'Cluster']].head())
+            # Log the centroid information for the datasheet to use
+            self.logger.info(f"K-means generated {len(centroids)} cluster centroids:")
+            for cluster_idx, centroid in enumerate(centroids):
+                self.logger.info(f"  Cluster {cluster_idx}: centroid at ({centroid[0]:.4f}, {centroid[1]:.4f}, {centroid[2]:.4f})")
             
-            # Verify centroid data integrity
-            self.logger.info("Verifying centroid data integrity in DataFrame...")
-            null_centroids = df_copy.iloc[clean_indices][['Centroid_X', 'Centroid_Y', 'Centroid_Z']].isnull().any(axis=1)
-            if null_centroids.any():
-                problem_rows = df_copy.iloc[clean_indices][null_centroids]
-                self.logger.error(f"Found {len(problem_rows)} rows with missing centroid data:")
-                self.logger.error(problem_rows[['DataID', 'Cluster', 'Centroid_X', 'Centroid_Y', 'Centroid_Z']].to_string())
-                raise ValueError("Missing centroid data detected after K-means clustering")
-                
-            self.logger.info("Centroid data integrity verified - all coordinates are valid")
+            # Store centroids in the DataFrame metadata for the worksheet to access
+            if hasattr(df_copy, 'attrs'):
+                df_copy.attrs['cluster_centroids'] = centroids
+                df_copy.attrs['centroid_map'] = centroid_map
+            
+            print(f"\n🎯 CENTROID STORAGE: Stored {len(centroids)} centroids in DataFrame metadata for worksheet access")
+            
+            print("\nDebug: Updated cluster assignments:")
+            print(df_copy.iloc[clean_indices[:5]][['DataID', 'Cluster']].to_string())
+            
+            # Individual data points now only have cluster assignments - no centroid coordinates
+            self.logger.info("Individual data points updated with cluster assignments only")
             self.logger.info(f"K-means clustering applied successfully to {len(clean_indices)} rows")
             
             # Save the updated DataFrame back to the manager

@@ -73,7 +73,31 @@ class ColorDataBridge:
             db = ColorAnalysisDB(sample_set_name)
             
             # Get all measurements, optionally filtered
-            measurements = db.get_all_measurements()
+            all_measurements = db.get_all_measurements()
+            
+            # Separate CENTROIDS entries from regular measurements
+            centroid_entries = [m for m in all_measurements if m.get('image_name') == 'CENTROIDS']
+            regular_measurements = [m for m in all_measurements if m.get('image_name') != 'CENTROIDS']
+            
+            print(f"Found {len(regular_measurements)} regular measurements and {len(centroid_entries)} centroid entries")
+            
+            # Create lookup table for centroid data by cluster_id
+            centroid_lookup = {}
+            for centroid in centroid_entries:
+                cluster_id = centroid.get('cluster_id')
+                if cluster_id is not None:
+                    centroid_lookup[cluster_id] = {
+                        'centroid_x': centroid.get('centroid_x'),
+                        'centroid_y': centroid.get('centroid_y'), 
+                        'centroid_z': centroid.get('centroid_z'),
+                        'sphere_color': centroid.get('sphere_color'),
+                        'sphere_radius': centroid.get('sphere_radius')
+                    }
+            
+            print(f"Created centroid lookup for clusters: {list(centroid_lookup.keys())}")
+            
+            # Use regular measurements for processing
+            measurements = regular_measurements
             
             if image_filter:
                 # Filter measurements by image name (case-insensitive partial match)
@@ -83,7 +107,7 @@ class ColorDataBridge:
             if limit:
                 measurements = measurements[:limit]
             
-            print(f"Loaded {len(measurements)} measurements from {sample_set_name}")
+            print(f"Processing {len(measurements)} measurements from {sample_set_name}")
             print(f"🔧 NORMALIZATION: Converting all data to normalized format for unified Ternary/Plot_3D compatibility")
             
             # Convert each measurement to a normalized ColorPoint
@@ -216,19 +240,27 @@ class ColorDataBridge:
                     }
                     
                     # Add cluster information if available
-                    if 'cluster_id' in measurement:
-                        metadata['cluster_id'] = measurement['cluster_id']
+                    cluster_id = measurement.get('cluster_id')
+                    if cluster_id is not None:
+                        metadata['cluster_id'] = cluster_id
+                        
+                        # Note: Centroid coordinates are NOT assigned here to individual data points.
+                        # Centroid data should only appear in dedicated centroid rows (2-5, etc.) 
+                        # as determined by the datasheet formatting process.
+                        # Each cluster gets exactly ONE centroid entry in its designated row.
                     
                     # Add Delta E information if available  
                     if 'delta_e' in measurement:
                         metadata['delta_e'] = measurement['delta_e']
                     
-                    # Add ternary-specific preferences (separate from Plot_3D preferences)
-                    # These are used only by ternary plots, maintaining data isolation
-                    ternary_marker = measurement.get('ternary_marker_preference', '.')
-                    ternary_color = measurement.get('ternary_color_preference', 'blue')
-                    metadata['marker'] = ternary_marker
-                    metadata['marker_color'] = ternary_color
+                    # Store marker/color preferences from database
+                    # Database columns: marker_preference, color_preference
+                    metadata['marker_preference'] = measurement.get('marker_preference', '.')  # Plot_3D primary
+                    metadata['color_preference'] = measurement.get('color_preference', 'blue')  # Plot_3D primary
+                    
+                    # Create aliases for Ternary plot (same data, different key names)
+                    metadata['ternary_marker'] = metadata['marker_preference']       # Ternary alias
+                    metadata['ternary_marker_color'] = metadata['color_preference']  # Ternary alias
                     
                     # Create ColorPoint object
                     color_point = ColorPoint(
@@ -480,6 +512,107 @@ class ColorDataBridge:
         stats['sample_sets'] = sorted(list(sample_sets))
         
         return stats
+    
+    def save_color_points_to_database(self, sample_set_name: str, color_points: List[ColorPoint]) -> bool:
+        """Save color points back to the internal database.
+        
+        Args:
+            sample_set_name: Name of the sample set database to save to
+            color_points: List of ColorPoint objects to save
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from .color_analysis_db import ColorAnalysisDB
+            
+            print(f"💾 SAVING TO DATABASE: {sample_set_name}")
+            print(f"   Points to save: {len(color_points)}")
+            
+            # Connect to the database
+            db = ColorAnalysisDB(sample_set_name)
+            
+            # Get all existing measurements to preserve data integrity
+            existing_measurements = db.get_all_measurements()
+            print(f"   Existing measurements in database: {len(existing_measurements)}")
+            
+            if not existing_measurements:
+                print("❌ No existing measurements found - cannot save to empty database")
+                return False
+            
+            # Create a mapping of point IDs to color points for easy lookup
+            point_lookup = {}
+            for point in color_points:
+                # Extract image name and coordinate from point ID (e.g., "image_pt5" -> image="image", coord=5)
+                parts = point.id.split('_pt')
+                if len(parts) == 2:
+                    image_name = parts[0]
+                    try:
+                        coord_point = int(parts[1])
+                        key = (image_name, coord_point)
+                        point_lookup[key] = point
+                    except ValueError:
+                        print(f"Warning: Could not parse coordinate from point ID: {point.id}")
+            
+            print(f"   Created lookup table for {len(point_lookup)} points")
+            
+            # Update existing measurements with new data from Plot_3D
+            updated_count = 0
+            for measurement in existing_measurements:
+                image_name = measurement.get('image_name', '')
+                coord_point = measurement.get('coordinate_point', 0)
+                key = (image_name, coord_point)
+                
+                if key in point_lookup:
+                    point = point_lookup[key]
+                    
+                    # Update database measurement with Plot_3D changes
+                    # Preserve original L*a*b* and RGB values, but update preferences and analysis data
+                    
+                    # Extract preferences from ColorPoint metadata (saved by Plot_3D)
+                    marker_pref = point.metadata.get('marker_preference', '.')
+                    color_pref = point.metadata.get('color_preference', 'blue')
+                    cluster_id = point.metadata.get('cluster_id', None)
+                    delta_e = point.metadata.get('delta_e', None)
+                    
+                    # Extract centroid and sphere data
+                    centroid_x = point.metadata.get('centroid_x', None)
+                    centroid_y = point.metadata.get('centroid_y', None) 
+                    centroid_z = point.metadata.get('centroid_z', None)
+                    sphere_color = point.metadata.get('sphere_color', None)
+                    sphere_radius = point.metadata.get('sphere_radius', None)
+                    
+                    # Update the measurement record using the correct method
+                    try:
+                        db.update_plot3d_extended_values(
+                            image_name,
+                            coord_point,
+                            cluster_id=cluster_id,
+                            delta_e=delta_e,
+                            centroid_x=centroid_x,
+                            centroid_y=centroid_y,
+                            centroid_z=centroid_z,
+                            sphere_color=sphere_color,
+                            sphere_radius=sphere_radius,
+                            marker=marker_pref,
+                            color=color_pref
+                        )
+                        updated_count += 1
+                        
+                        if updated_count <= 3:  # Debug first few updates
+                            print(f"   Updated {image_name}_pt{coord_point}: marker={marker_pref}, color={color_pref}, cluster={cluster_id}")
+                        
+                    except Exception as update_error:
+                        print(f"Warning: Failed to update measurement {measurement['id']}: {update_error}")
+            
+            print(f"✅ Successfully updated {updated_count} measurements in database: {sample_set_name}")
+            return updated_count > 0
+            
+        except Exception as e:
+            print(f"❌ Error saving to database {sample_set_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _detect_database_format(self, measurements: List[Dict[str, Any]], sample_set_name: str) -> str:
         """Intelligently detect whether database contains normalized (0-1) or actual Lab values.

@@ -10,7 +10,7 @@ plt.rcParams['axes.titlesize'] = 14
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk, FigureCanvasTkAgg
 from matplotlib import ticker
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import subprocess
 import sys
 import pandas as pd
@@ -29,6 +29,7 @@ except ImportError:
 from .logging_setup import setup_logging
 from .template_selector import TemplateSelector
 from .data_processor import load_data
+from utils.color_data_bridge import ColorDataBridge
 from .plot_utils import (calculate_aspect_ratios, calculate_default_ranges, set_axis_labels)
 from .axis_controls import AxisControls, create_button_frame
 from .rotation_controls import RotationControls
@@ -60,7 +61,7 @@ class Plot3DApp:
         'x': 40,  # Cross (increased for better visibility)
     }
     
-    def __init__(self, parent=None, data_path=None, dataframe=None, worksheet_update_callback=None):
+    def __init__(self, parent=None, data_path=None, dataframe=None, worksheet_update_callback=None, sample_set_name=None):
         """Initialize the Plot3DApp
         
         Args:
@@ -68,6 +69,7 @@ class Plot3DApp:
             data_path: Optional path to data file (skip file dialog)
             dataframe: Optional DataFrame for direct integration (no file needed)
             worksheet_update_callback: Optional callback to update parent worksheet with changes
+            sample_set_name: Optional database sample set name to load directly (bypasses template selector)
         """
         self._refresh_in_progress = False
         self.axis_range_changed = False  # Flag to track when axis ranges change
@@ -84,11 +86,20 @@ class Plot3DApp:
         # Store the worksheet update callback for bidirectional data flow
         self.worksheet_update_callback = worksheet_update_callback
         
-        # Detect realtime mode (when DataFrame is provided with callback)
-        # In realtime mode, we'll disable K-means and ΔE due to indexing complexity
-        self.is_realtime_mode = (dataframe is not None and worksheet_update_callback is not None)
+        # Initialize database bridge for internal database access
+        self.bridge = ColorDataBridge()
+        self.sample_set_name = sample_set_name  # Track current database sample set (may be provided directly)
         
-        # Handle data source - DataFrame, file path, or file dialog
+        # Detect realtime mode - only for live spreadsheet editing, not database mode
+        # True realtime mode is when we're editing a live spreadsheet (not database data)
+        # Database mode (even with DataFrame + callback) should allow K-means and ΔE
+        self.is_realtime_mode = (
+            dataframe is not None and 
+            worksheet_update_callback is not None and 
+            sample_set_name is None  # If sample_set_name exists, we're in database mode, not realtime
+        )
+        
+        # Handle data source - DataFrame, file path, database, or file dialog
         if dataframe is not None:
             # Direct DataFrame integration (no file needed!)
             self.df = dataframe
@@ -98,6 +109,10 @@ class Plot3DApp:
             # Use provided data path (file-based mode)
             self.file_path = data_path
             print(f"Using provided data path: {self.file_path}")
+        elif sample_set_name:
+            # Direct database mode - load from specified database
+            self.file_path = None
+            print(f"Using provided database: {sample_set_name}")
         else:
             # Get file path from template selector (standalone mode)
             try:
@@ -121,16 +136,23 @@ class Plot3DApp:
                     else:
                         return  # Just return in embedded mode
                     
-                # Get the file path with proper null checking
-                self.file_path = template_selector.file_path if template_selector.file_path else None
-                
-                # Check if file path is valid
-                if self.file_path is None or not self.file_path:
-                    print("No file path obtained from template selector")
-                    if parent is None:  # Only exit in standalone mode
-                        sys.exit(0)
-                    else:
-                        return  # Just return in embedded mode
+                # Check if database mode was selected
+                if hasattr(template_selector, 'database_mode') and template_selector.database_mode:
+                    # Database mode - load from internal database
+                    self.sample_set_name = template_selector.selected_database
+                    self.file_path = None
+                    print(f"Template selector chose database mode: {self.sample_set_name}")
+                else:
+                    # File mode - get the file path with proper null checking
+                    self.file_path = template_selector.file_path if template_selector.file_path else None
+                    
+                    # Check if file path is valid
+                    if self.file_path is None or not self.file_path:
+                        print("No file path obtained from template selector")
+                        if parent is None:  # Only exit in standalone mode
+                            sys.exit(0)
+                        else:
+                            return  # Just return in embedded mode
                     
                 print(f"Template selector provided file path: {self.file_path}")
                     
@@ -203,9 +225,30 @@ class Plot3DApp:
         
         # Load initial data (only if not already provided as DataFrame)
         if not hasattr(self, 'df') or self.df is None:
-            self.df = load_data(self.file_path)
-            if self.df is None:
-                messagebox.showerror("Error", "Failed to load data")
+            if self.sample_set_name:
+                # Load from database
+                print(f"Loading data from database: {self.sample_set_name}")
+                try:
+                    color_points, db_format = self.bridge.load_color_points_from_database(self.sample_set_name)
+                    if color_points:
+                        self.df = self._convert_color_points_to_dataframe(color_points)
+                        print(f"Loaded {len(color_points)} points from database ({db_format} format)")
+                        print(f"Converted to DataFrame with {len(self.df)} rows")
+                        # Note: Save button will be enabled during UI creation
+                    else:
+                        messagebox.showerror("Error", f"Failed to load data from database: {self.sample_set_name}")
+                        sys.exit(1)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to load database {self.sample_set_name}: {e}")
+                    sys.exit(1)
+            elif self.file_path:
+                # Load from file
+                self.df = load_data(self.file_path)
+                if self.df is None:
+                    messagebox.showerror("Error", "Failed to load data")
+                    sys.exit(1)
+            else:
+                messagebox.showerror("Error", "No data source specified")
                 sys.exit(1)
         else:
             print(f"Using provided DataFrame with {len(self.df)} rows")
@@ -221,7 +264,7 @@ class Plot3DApp:
             self.df = updated_df
             self.refresh_plot()
             
-            # Also update the parent worksheet if callback is provided
+            # Also update the parent worksheet if callback is provided (integrated mode)
             if self.worksheet_update_callback:
                 try:
                     # Check if row selection info is available from K-means manager
@@ -239,6 +282,36 @@ class Plot3DApp:
                     print(f"Successfully updated parent worksheet with {len(updated_df)} rows")
                 except Exception as e:
                     print(f"Warning: Failed to update parent worksheet: {e}")
+            elif self.sample_set_name:
+                # Standalone mode - automatically save to database to persist K-means/∆E results
+                try:
+                    print(f"🔄 Standalone mode: Auto-saving analysis results to database {self.sample_set_name}")
+                    color_points = self._convert_dataframe_to_color_points(updated_df)
+                    if color_points:
+                        success = self.bridge.save_color_points_to_database(self.sample_set_name, color_points)
+                        if success:
+                            print(f"✅ Analysis results auto-saved to database: {self.sample_set_name}")
+                        else:
+                            print(f"❌ Failed to auto-save results to database")
+                    else:
+                        print(f"❌ Failed to convert data for database saving")
+                except Exception as db_error:
+                    print(f"❌ Error auto-saving to database: {db_error}")
+            elif self.sample_set_name:
+                # Standalone mode - automatically save to database to persist K-means/∆E results
+                try:
+                    print(f"🔄 Standalone mode: Auto-saving analysis results to database {self.sample_set_name}")
+                    color_points = self._convert_dataframe_to_color_points(updated_df)
+                    if color_points:
+                        success = self.bridge.save_color_points_to_database(self.sample_set_name, color_points)
+                        if success:
+                            print(f"✅ Analysis results auto-saved to database: {self.sample_set_name}")
+                        else:
+                            print(f"❌ Failed to auto-save results to database")
+                    else:
+                        print(f"❌ Failed to convert data for database saving")
+                except Exception as db_error:
+                    print(f"❌ Error auto-saving to database: {db_error}")
         
         # Initialize K-means manager with data and file path (if available)
         self.kmeans_manager = KmeansManager(on_data_update=on_kmeans_update)
@@ -248,8 +321,16 @@ class Plot3DApp:
         
         # Initialize Delta E manager with the same callback
         self.delta_e_manager = DeltaEManager(on_data_update=on_kmeans_update)
-        if self.file_path:  # Only set file path if we're in file-based mode
+        if self.file_path:  
+            # File-based mode - use actual file path
             self.delta_e_manager.set_file_path(self.file_path)
+        elif self.sample_set_name:
+            # Database mode - create a placeholder path for Delta E operations
+            # This allows Delta E to work with database data
+            placeholder_path = f"/tmp/plot3d_database_{self.sample_set_name}.ods"
+            # Don't create the actual file, just set a path for Delta E internal operations
+            self.delta_e_manager.file_path = placeholder_path
+            self.delta_e_manager.logger.info(f"Using database mode with placeholder path: {placeholder_path}")
         self.delta_e_manager.load_data(self.df)
         
         # Initialize logger for custom delta E calculator
@@ -277,8 +358,8 @@ class Plot3DApp:
         # Create initial plot
         self.refresh_plot()
         
-        # Configure window protocol first
-        self.root.protocol("WM_DELETE_WINDOW", self.cleanup_and_exit)
+        # Configure window protocol first - consistent exit handling
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         
         # Schedule delayed file opening only as a backup
         # in case the immediate opening failed
@@ -591,8 +672,7 @@ class Plot3DApp:
             self.sphere_manager.update_references(ax, self.canvas, self.df)
             self._update_sphere_toggles()  # Update sphere visibility toggles
             self.sphere_manager.render_spheres()
-            # Adjust layout and refresh
-            self.fig.tight_layout()
+            # Note: tight_layout moved to end to avoid interfering with sphere rendering
             
             # Update highlight manager references
             if self.highlight_manager:
@@ -953,6 +1033,12 @@ class Plot3DApp:
                 except Exception as e:
                     print(f"Warning: Could not update rotation controls: {e}")
             
+            # Apply tight layout at the end to avoid interfering with 3D surfaces
+            try:
+                self.fig.tight_layout()
+            except Exception as e:
+                print(f"Warning: tight_layout failed: {e}")
+            
             # Redraw the canvas with proper error handling
             try:
                 self.canvas.draw()
@@ -1296,9 +1382,37 @@ class Plot3DApp:
         button_frame = create_button_frame(interaction_frame, on_refresh=self.refresh_plot)
         button_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=2)
         
+        # Database access controls - enable internal database access like Ternary
+        db_frame = ttk.Frame(interaction_frame)
+        db_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=2)
+        db_frame.grid_columnconfigure(0, weight=1)
+        db_frame.grid_columnconfigure(1, weight=1)
+        
+        # Load internal database button (same as Ternary)
+        ttk.Button(db_frame, text="📊 Load Database", 
+                  command=self._load_data_dialog).grid(row=0, column=0, sticky='ew', padx=2, pady=2)
+        
+        # Load external file button (existing functionality)
+        ttk.Button(db_frame, text="📁 Load File", 
+                  command=self._load_external_file).grid(row=0, column=1, sticky='ew', padx=2, pady=2)
+        
+        # Save to database button (only show if loaded from database)
+        initial_state = 'normal' if self.sample_set_name else 'disabled'
+        self.save_db_button = ttk.Button(db_frame, text="💾 Save to Database", 
+                                        command=self._save_to_database, state=initial_state)
+        self.save_db_button.grid(row=1, column=0, columnspan=2, sticky='ew', padx=2, pady=2)
+        
+        # Refresh data button - reload from current source (database or file)
+        ttk.Button(db_frame, text="🔄 Refresh Data", 
+                  command=self._refresh_data_from_source).grid(row=2, column=0, columnspan=2, sticky='ew', padx=2, pady=2)
+        
+        # Open Datasheet button - for realtime data editing
+        ttk.Button(db_frame, text="📊 Open Datasheet", 
+                  command=self._open_datasheet).grid(row=3, column=0, columnspan=2, sticky='ew', padx=2, pady=2)
+        
         # Point identification (click-to-highlight) - more compact design
         self.highlight_frame = ttk.Frame(interaction_frame)
-        self.highlight_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=2)
+        self.highlight_frame.grid(row=2, column=0, sticky='ew', padx=5, pady=2)
         # Initialize highlight manager with improved UI and 2D view support
         self.highlight_manager = HighlightManager(
             self,  # Pass self as master so highlight manager can call refresh_plot
@@ -1378,21 +1492,22 @@ class Plot3DApp:
             command=self.refresh_plot
         ).grid(row=1, column=0, sticky='w', padx=5, pady=5)
 
-        # Create K-Means clustering GUI (disabled in realtime mode due to indexing complexity)
-        if not self.is_realtime_mode and hasattr(self, 'kmeans_manager') and self.kmeans_manager:
-            kmeans_frame = self.kmeans_manager.create_gui(self.control_frame)
-            if kmeans_frame:
-                kmeans_frame.grid(row=7, column=0, sticky='ew', padx=5, pady=5)
-                print("K-Means clustering GUI created successfully")
-            else:
-                print("Warning: Failed to create K-Means clustering GUI")
-        elif self.is_realtime_mode:
-            print("K-Means clustering disabled in realtime mode (use external .ods files for K-means)")
+        # Create K-Means clustering GUI (enabled in all modes)
+        if hasattr(self, 'kmeans_manager') and self.kmeans_manager:
+            try:
+                kmeans_frame = self.kmeans_manager.create_gui(self.control_frame)
+                if kmeans_frame:
+                    kmeans_frame.grid(row=7, column=0, sticky='ew', padx=5, pady=5)
+                    print("K-Means clustering GUI created successfully")
+                else:
+                    print("Warning: Failed to create K-Means clustering GUI")
+            except Exception as e:
+                print(f"Warning: Error creating K-Means GUI: {e}")
         else:
             print("Warning: K-Means manager not available")
         
-        # Create ΔE Manager GUI (disabled in realtime mode due to indexing complexity)
-        if not self.is_realtime_mode and hasattr(self, 'delta_e_manager') and self.delta_e_manager:
+        # Create ΔE Manager GUI (enabled in all modes)
+        if hasattr(self, 'delta_e_manager') and self.delta_e_manager:
             try:
                 delta_e_frame = self.delta_e_manager.create_gui(self.control_frame)
                 if delta_e_frame:
@@ -1402,8 +1517,6 @@ class Plot3DApp:
                     print("Warning: Failed to create ΔE Manager GUI")
             except Exception as e:
                 print(f"Warning: Error creating ΔE Manager GUI: {e}")
-        elif self.is_realtime_mode:
-            print("ΔE Manager disabled in realtime mode (use external .ods files for ΔE analysis)")
         else:
             print("Warning: ΔE Manager not available")
         
@@ -1452,6 +1565,24 @@ class Plot3DApp:
         sphere_frame.update()
         sphere_frame.update_idletasks()
         
+        # CREATE APPLICATION CONTROL SECTION - standardized for both internal and standalone modes
+        app_control_frame = ttk.LabelFrame(self.control_frame, text="Application Control")
+        app_control_frame.grid(row=10, column=0, sticky='ew', padx=5, pady=5)
+        app_control_frame.grid_columnconfigure(0, weight=1)
+        
+        # Exit buttons - same for both internal and standalone modes
+        exit_frame = ttk.Frame(app_control_frame)
+        exit_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+        exit_frame.grid_columnconfigure(0, weight=1)
+        
+        # Return to Launcher button
+        ttk.Button(exit_frame, text="← Return to Launcher", 
+                  command=self._exit_plot3d).grid(row=0, column=0, sticky='ew', pady=4, ipadx=15)
+        
+        # Exit Application button
+        ttk.Button(exit_frame, text="🚪 Exit Application", 
+                  command=self._exit_application).grid(row=1, column=0, sticky='ew', pady=4, ipadx=15)
+        
         # No duplicate zoom controls needed - already initialized after rotation controls
         
         # Configure control frame grid
@@ -1498,22 +1629,295 @@ class Plot3DApp:
             print(f"Warning: Could not calculate optimal window size: {e}")
             self.root.geometry("1200x800")
     
-    def cleanup_and_exit(self):
-        # App cleanup and shutdown handler
-        print("Application is closing, performing cleanup...")
+    def _exit_plot3d(self):
+        """Exit Plot 3D window and return to launcher."""
+        try:
+            # Ask for confirmation
+            if messagebox.askyesno("Close Plot 3D Window", 
+                                 "Close the Plot 3D window?\n\n"
+                                 "You will return to the StampZ-III launcher where you can\n"
+                                 "choose a different analysis mode or exit completely.\n\n"
+                                 "Any unsaved changes will be lost unless you've saved them."):
+                
+                # Clean up current window (don't auto-return to launcher)
+                self._on_close(return_to_launcher=False)
+                
+                # Return to the main launcher
+                self._return_to_launcher()
+                
+                print("User requested Plot 3D window closure, returning to launcher")
+        except Exception as e:
+            print(f"Error during Plot 3D window exit: {e}")
+            # Force close if there's an error but still try to return to launcher
+            try:
+                self._on_close(return_to_launcher=False)
+                self._return_to_launcher()
+            except:
+                # If everything fails, just exit
+                import sys
+                sys.exit(0)
+    
+    def _return_to_launcher(self):
+        """Return to the main StampZ-III launcher with crash protection."""
+        try:
+            print("Attempting to return to launcher...")
+            
+            # Add delay to ensure window cleanup is complete
+            import time
+            time.sleep(0.2)  # Delay for better cleanup
+            
+            # Handle launcher return based on context
+            if self.is_embedded:
+                # Internal mode - close this window and let parent continue
+                print("Internal mode - closing Plot 3D window, returning to main app")
+                try:
+                    if hasattr(self, 'root') and self.root:
+                        self.root.destroy()
+                    # Don't exit the entire application, just return to parent
+                    return
+                except Exception as cleanup_error:
+                    print(f"Warning: Error during internal mode cleanup: {cleanup_error}")
+                    return
+            else:
+                # Standalone mode - return to launcher
+                print("Standalone mode - showing launcher selector")
+                try:
+                    # Import and show the launcher with protection
+                    from launch_selector import LaunchSelector
+                    
+                    # Create launcher with error handling
+                    selector = LaunchSelector()
+                    selected_mode = selector.show()
+                    
+                    # Handle launcher cleanup more safely
+                    try:
+                        if hasattr(selector, 'root') and selector.root:
+                            if hasattr(selector.root, 'winfo_exists'):
+                                try:
+                                    if selector.root.winfo_exists():
+                                        selector.root.quit()
+                                        selector.root.destroy()
+                                except tk.TclError:
+                                    pass  # Window already destroyed
+                    except Exception as cleanup_error:
+                        print(f"Selector cleanup warning (safe to ignore): {cleanup_error}")
+                    
+                    # Handle the selected mode with better error protection
+                    self._handle_launcher_selection(selected_mode)
+                    
+                except ImportError as ie:
+                    print(f"Could not import launcher: {ie}")
+                    import sys
+                    sys.exit(0)
+                except Exception as launcher_error:
+                    print(f"Error with launcher: {launcher_error}")
+                    import sys
+                    sys.exit(0)
+                    
+        except Exception as e:
+            print(f"Critical error in _return_to_launcher: {e}")
+            # If anything fails, exit gracefully without crashing
+            try:
+                import sys
+                print("Performing safe exit due to launcher failure")
+                sys.exit(0)
+            except:
+                # Last resort - silent exit
+                import os
+                os._exit(0)
+    
+    def _handle_launcher_selection(self, selected_mode):
+        """Handle launcher selection with protection against crashes."""
+        try:
+            if selected_mode == "full":
+                print("Launching full StampZ application")
+                from app import StampZApp
+                import tkinter as tk
+                
+                root = tk.Tk()
+                app = StampZApp(root)
+                root.mainloop()
+                
+            elif selected_mode == "ternary":
+                print("Launching ternary viewer")
+                from main import launch_ternary_viewer
+                launch_ternary_viewer()
+                
+            elif selected_mode == "plot3d":
+                print("Relaunching Plot_3D mode")
+                from plot3d.standalone_plot3d import main as plot3d_main
+                plot3d_main()
+                
+            else:
+                # User cancelled or chose to exit
+                print("User cancelled launcher or chose to exit")
+                import sys
+                sys.exit(0)
+                
+        except Exception as launch_error:
+            print(f"Error launching selected mode '{selected_mode}': {launch_error}")
+            # Exit cleanly instead of with error code
+            import sys
+            sys.exit(0)
+    
+    def _exit_application(self):
+        """Exit entire application - works for both internal and standalone modes."""
+        try:
+            # Determine appropriate message based on context
+            if self.is_embedded:
+                message = ("Exit the StampZ-III application?\n\n"
+                          "This will close all windows including the main application.\n"
+                          "Make sure you've saved any important work.")
+            else:
+                message = ("Exit the entire StampZ-III application?\n\n"
+                          "This will close all windows and stop all background processes.\n"
+                          "Make sure you've saved any important work.")
+            
+            # Double confirmation for full application exit
+            if messagebox.askyesno("Exit Application", message):
+                
+                # Clean up this window first
+                try:
+                    self._cleanup_managers()
+                    print("Cleaned up managers before application exit")
+                except Exception as cleanup_error:
+                    print(f"Warning: Error during cleanup before exit: {cleanup_error}")
+                
+                # Handle cleanup based on context
+                if self.is_embedded:
+                    # Internal mode: Clean up properly and close parent application
+                    try:
+                        # Close any child windows
+                        for widget in self.root.winfo_children():
+                            if isinstance(widget, tk.Toplevel):
+                                widget.destroy()
+                        
+                        # Close this window
+                        self.root.destroy()
+                        
+                        # Close parent application if it exists
+                        if hasattr(self, '_parent_window'):
+                            parent = self._parent_window
+                            if hasattr(parent, 'quit'):
+                                parent.quit()
+                            if hasattr(parent, 'destroy'):
+                                parent.destroy()
+                            
+                        print("User requested full application exit from internal Plot 3D window")
+                    except Exception as parent_cleanup_error:
+                        print(f"Warning: Error during parent cleanup: {parent_cleanup_error}")
+                else:
+                    # Standalone mode: Direct exit
+                    try:
+                        # Close any child windows
+                        for widget in self.root.winfo_children():
+                            if isinstance(widget, tk.Toplevel):
+                                widget.destroy()
+                    except Exception as window_cleanup_error:
+                        print(f"Warning: Error closing child windows: {window_cleanup_error}")
+                    
+                    # Quit the window
+                    self.root.quit()  # Stop the mainloop
+                    self.root.destroy()  # Destroy the window
+                    
+                    print("User requested full application exit from standalone Plot 3D window")
+                
+                # Final exit for both modes
+                try:
+                    import sys
+                    sys.exit(0)
+                except:
+                    pass
         
+        except Exception as e:
+            print(f"Error during application exit: {e}")
+            # Force exit if there's an error
+            try:
+                import sys
+                sys.exit(1)
+            except:
+                pass
+    
+    def _on_close(self, return_to_launcher=True):
+        """Handle window close with improved crash protection.
+        
+        Args:
+            return_to_launcher: If True, return to launcher after closing. If False, just destroy window.
+        """
+        try:
+            # Prevent multiple close attempts
+            if hasattr(self, '_closing'):
+                return
+            self._closing = True
+            
+            print(f"Window close initiated, return_to_launcher={return_to_launcher}")
+            
+            # Clean up managers
+            try:
+                self._cleanup_managers()
+                print("Cleaned up managers on window close")
+            except Exception as e:
+                print(f"Warning: Error during manager cleanup: {e}")
+            
+            # Destroy the window safely with better error handling
+            try:
+                if hasattr(self, 'root') and self.root:
+                    try:
+                        # Check if window still exists before destroying
+                        if hasattr(self.root, 'winfo_exists') and self.root.winfo_exists():
+                            self.root.quit()  # Stop mainloop first
+                            self.root.destroy()  # Then destroy window
+                            print("Window destroyed successfully")
+                    except tk.TclError as tcl_error:
+                        print(f"Window already destroyed: {tcl_error}")
+                    except Exception as destroy_error:
+                        print(f"Window destruction error: {destroy_error}")
+            except Exception as window_error:
+                print(f"Window handling error: {window_error}")
+            
+            # Return to launcher if requested (and not already in a return-to-launcher flow)
+            if return_to_launcher and not hasattr(self, '_returning_to_launcher'):
+                self._returning_to_launcher = True  # Prevent recursion
+                try:
+                    print("Window closed via X button, returning to launcher")
+                    # Delay to ensure window cleanup is complete
+                    import time
+                    time.sleep(0.1)
+                    self._return_to_launcher()
+                except Exception as e:
+                    print(f"Failed to return to launcher from _on_close: {e}")
+                    # If launcher fails, exit gracefully
+                    try:
+                        import sys
+                        sys.exit(0)
+                    except:
+                        import os
+                        os._exit(0)
+        
+        except Exception as close_error:
+            print(f"Critical error in _on_close: {close_error}")
+            # Emergency exit if all else fails
+            try:
+                import sys
+                sys.exit(0)
+            except:
+                import os
+                os._exit(0)
+    
+    def _cleanup_managers(self):
+        """Clean up managers and save data before exit."""
         # Clean up parent window reference if stored (macOS fix)
         if hasattr(self, '_parent_window'):
             self._parent_window = None
         
         try:
-            if hasattr(self, 'custom_delta_e_calculator'):
+            if hasattr(self, 'custom_delta_e_calculator') and hasattr(self.custom_delta_e_calculator, 'save_to_file'):
                 self.custom_delta_e_calculator.save_to_file()
                 
-            if hasattr(self, 'kmeans_manager'):
+            if hasattr(self, 'kmeans_manager') and hasattr(self.kmeans_manager, 'save_to_file'):
                 self.kmeans_manager.save_to_file()
                 
-            if hasattr(self, 'delta_e_manager'):
+            if hasattr(self, 'delta_e_manager') and hasattr(self.delta_e_manager, 'save_to_file'):
                 self.delta_e_manager.save_to_file()
                 
             # Save zoom presets before exit
@@ -1544,14 +1948,571 @@ class Plot3DApp:
             plt.close('all')
         except Exception as e:
             print(f"Warning: Error closing plots: {str(e)}")
-            
+    
+    def _load_data_dialog(self):
+        """Open dialog to load internal database - same functionality as Ternary."""
         try:
-            self.root.destroy()
+            sample_sets = self.bridge.get_available_sample_sets()
+            if not sample_sets:
+                messagebox.showinfo("No Data", "No sample sets found in internal database.")
+                return
+            
+            # Create selection dialog (same as Ternary)
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Load Sample Set")
+            dialog.geometry("350x400")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            ttk.Label(dialog, text="Select sample set:", font=('Arial', 11, 'bold')).pack(pady=10)
+            
+            listbox = tk.Listbox(dialog, height=15)
+            for sample_set in sample_sets:
+                listbox.insert(tk.END, sample_set)
+            listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+            
+            def on_load():
+                selection = listbox.curselection()
+                if selection:
+                    selected_set = sample_sets[selection[0]]
+                    self.sample_set_name = selected_set
+                    
+                    # Load color points from database and convert to Plot_3D DataFrame format
+                    color_points, db_format = self.bridge.load_color_points_from_database(selected_set)
+                    
+                    if color_points:
+                        # Convert color points to Plot_3D DataFrame format
+                        self.df = self._convert_color_points_to_dataframe(color_points)
+                        
+                        # Clear file path since we're now using database
+                        self.file_path = None
+                        
+                        # Enable save to database button
+                        if hasattr(self, 'save_db_button'):
+                            self.save_db_button.config(state='normal')
+                        
+                        # Update managers with new data
+                        if hasattr(self, 'kmeans_manager'):
+                            self.kmeans_manager.load_data(self.df)
+                        if hasattr(self, 'delta_e_manager'):
+                            self.delta_e_manager.load_data(self.df)
+                        if hasattr(self, 'custom_delta_e_calculator'):
+                            self.custom_delta_e_calculator.load_data(self.df)
+                        
+                        # Refresh plot
+                        self.refresh_plot()
+                        
+                        print(f"Loaded database: {selected_set} ({db_format} format) - {len(color_points)} points")
+                        print(f"Converted to DataFrame with {len(self.df)} rows")
+                        
+                    dialog.destroy()
+            
+            ttk.Button(dialog, text="Load", command=on_load).pack(pady=5)
+            
         except Exception as e:
-            print(f"Warning: Error destroying root window: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load database: {e}")
+    
+    def _load_external_file(self):
+        """Load external .ods file using existing template selector functionality."""
+        try:
+            from tkinter import filedialog
+            
+            # Use file dialog to select external file
+            file_types = [
+                ('OpenDocument Spreadsheet', '*.ods'),
+                ('All files', '*.*')
+            ]
+            
+            selected_file = filedialog.askopenfilename(
+                title="Load External ODS File",
+                filetypes=file_types
+            )
+            
+            if selected_file:
+                # Update file path and clear database info
+                self.file_path = os.path.abspath(selected_file)
+                self.sample_set_name = None
+                
+                # Disable save to database button since we're using external file
+                if hasattr(self, 'save_db_button'):
+                    self.save_db_button.config(state='disabled')
+                
+                # Load new data
+                self.df = load_data(self.file_path)
+                
+                if self.df is not None:
+                    # Update managers with new data
+                    if hasattr(self, 'kmeans_manager'):
+                        self.kmeans_manager.set_file_path(self.file_path)
+                        self.kmeans_manager.load_data(self.df)
+                    if hasattr(self, 'delta_e_manager'):
+                        self.delta_e_manager.set_file_path(self.file_path)
+                        self.delta_e_manager.load_data(self.df)
+                    if hasattr(self, 'custom_delta_e_calculator'):
+                        self.custom_delta_e_calculator.set_file_path(self.file_path)
+                        self.custom_delta_e_calculator.load_data(self.df)
+                    
+                    # Refresh plot
+                    self.refresh_plot()
+                    
+                    # Open file in LibreOffice if requested
+                    self._open_file_immediate(self.file_path)
+                    
+                    print(f"Loaded external file: {selected_file}")
+                    print(f"DataFrame has {len(self.df)} rows")
+                else:
+                    messagebox.showerror("Error", "Failed to load data from selected file")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load external file: {e}")
+    
+    def _save_to_database(self):
+        """Save current Plot_3D data back to the internal database."""
+        try:
+            if not self.sample_set_name:
+                messagebox.showwarning("No Database", "No database loaded to save to.")
+                return
+            
+            if self.df is None or len(self.df) == 0:
+                messagebox.showwarning("No Data", "No data to save to database.")
+                return
+            
+            # Ask for confirmation
+            if not messagebox.askyesno("Save to Database", 
+                                     f"Save current Plot_3D analysis back to database '{self.sample_set_name}'?\n\n"
+                                     f"This will update the internal database with:\n"
+                                     f"• K-means cluster assignments\n"
+                                     f"• ΔE calculations\n"
+                                     f"• Marker and color preferences\n\n"
+                                     f"Original data will be preserved."):
+                return
+            
+            # Convert DataFrame back to color points
+            color_points = self._convert_dataframe_to_color_points(self.df)
+            
+            if color_points:
+                # Save back to database using bridge
+                success = self.bridge.save_color_points_to_database(self.sample_set_name, color_points)
+                
+                if success:
+                    messagebox.showinfo("Success", 
+                                       f"Successfully saved {len(color_points)} points to database '{self.sample_set_name}'.\n\n"
+                                       f"Changes are now available in Ternary Plot analysis.")
+                    print(f"Saved Plot_3D analysis to database: {self.sample_set_name}")
+                else:
+                    messagebox.showerror("Error", "Failed to save data to database.")
+            else:
+                messagebox.showerror("Error", "Failed to convert data for database saving.")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save to database: {e}")
+    
+    def _refresh_data_from_source(self):
+        """Refresh data from the current source (database or file)."""
+        try:
+            print(f"\n🔄 REFRESHING DATA FROM SOURCE")
+            
+            if self.sample_set_name:
+                # Refresh from database
+                print(f"Refreshing from database: {self.sample_set_name}")
+                
+                try:
+                    color_points, db_format = self.bridge.load_color_points_from_database(self.sample_set_name)
+                    if color_points:
+                        # Convert to DataFrame and update
+                        self.df = self._convert_color_points_to_dataframe(color_points)
+                        
+                        # Update managers with refreshed data
+                        if hasattr(self, 'kmeans_manager'):
+                            self.kmeans_manager.load_data(self.df)
+                        if hasattr(self, 'delta_e_manager'):
+                            self.delta_e_manager.load_data(self.df)
+                        if hasattr(self, 'custom_delta_e_calculator'):
+                            self.custom_delta_e_calculator.load_data(self.df)
+                        
+                        # Update group display manager
+                        if hasattr(self, 'group_display_manager'):
+                            self.group_display_manager.update_data(self.df)
+                        
+                        # Refresh the plot
+                        self.refresh_plot()
+                        
+                        print(f"✅ Successfully refreshed {len(color_points)} points from database: {self.sample_set_name}")
+                        messagebox.showinfo(
+                            "Data Refreshed",
+                            f"✅ Successfully refreshed data from database!\n\n"
+                            f"Database: {self.sample_set_name}\n"
+                            f"Format: {db_format}\n"
+                            f"Data points: {len(color_points)}\n\n"
+                            f"All changes from StampZ have been loaded including:\n"
+                            f"• Updated centroid coordinates\n"
+                            f"• Modified colors and radius values\n"
+                            f"• Latest analysis data"
+                        )
+                        
+                    else:
+                        print(f"❌ No data found in database: {self.sample_set_name}")
+                        messagebox.showwarning("No Data", f"No data found in database: {self.sample_set_name}")
+                        
+                except Exception as db_error:
+                    print(f"❌ Database refresh error: {db_error}")
+                    messagebox.showerror("Database Error", f"Failed to refresh from database: {db_error}")
+                    
+            elif self.file_path:
+                # Refresh from file
+                print(f"Refreshing from file: {self.file_path}")
+                
+                try:
+                    # Reload data from file
+                    from .data_processor import load_data
+                    self.df = load_data(self.file_path)
+                    
+                    if self.df is not None:
+                        # Update managers with refreshed data
+                        if hasattr(self, 'kmeans_manager'):
+                            self.kmeans_manager.load_data(self.df)
+                        if hasattr(self, 'delta_e_manager'):
+                            self.delta_e_manager.load_data(self.df)
+                        if hasattr(self, 'custom_delta_e_calculator'):
+                            self.custom_delta_e_calculator.load_data(self.df)
+                        
+                        # Update group display manager
+                        if hasattr(self, 'group_display_manager'):
+                            self.group_display_manager.update_data(self.df)
+                        
+                        # Refresh the plot
+                        self.refresh_plot()
+                        
+                        print(f"✅ Successfully refreshed {len(self.df)} points from file: {self.file_path}")
+                        messagebox.showinfo(
+                            "Data Refreshed",
+                            f"✅ Successfully refreshed data from file!\n\n"
+                            f"File: {os.path.basename(self.file_path)}\n"
+                            f"Data points: {len(self.df)}"
+                        )
+                    else:
+                        print(f"❌ Failed to load data from file: {self.file_path}")
+                        messagebox.showerror("File Error", f"Failed to load data from file: {self.file_path}")
+                        
+                except Exception as file_error:
+                    print(f"❌ File refresh error: {file_error}")
+                    messagebox.showerror("File Error", f"Failed to refresh from file: {file_error}")
+                    
+            else:
+                print(f"❌ No data source to refresh from")
+                messagebox.showwarning(
+                    "No Data Source",
+                    "No database or file loaded to refresh from.\n\n"
+                    "Please load a database or file first."
+                )
+                
+        except Exception as e:
+            print(f"❌ Error refreshing data: {e}")
+            messagebox.showerror("Refresh Error", f"Failed to refresh data: {e}")
+    
+    def _open_datasheet(self):
+        """Open realtime datasheet with current Plot_3D data."""
+        try:
+            if self.df is None or len(self.df) == 0:
+                messagebox.showwarning("No Data", "No data available to open in datasheet.")
+                return
+            
+            # Check if we have a data source name
+            if self.sample_set_name:
+                datasheet_title = f"Plot_3D Datasheet: {self.sample_set_name}"
+            elif self.file_path:
+                import os
+                datasheet_title = f"Plot_3D Datasheet: {os.path.basename(self.file_path)}"
+            else:
+                datasheet_title = "Plot_3D Datasheet"
+            
+            print(f"Opening datasheet with {len(self.df)} data points")
+            print(f"Title: {datasheet_title}")
+            
+            # Import the realtime datasheet component
+            try:
+                from gui.realtime_plot3d_sheet import RealtimePlot3DSheet
+                
+            # Create datasheet with current Plot_3D data
+                datasheet = RealtimePlot3DSheet(
+                    parent=self.root,
+                    sample_set_name=self.sample_set_name or "Plot_3D_Data",  # Use actual database name, not display title
+                    display_title=datasheet_title,  # Pass display title separately
+                    load_initial_data=False  # We'll provide the data directly
+                )
+                
+                # Populate datasheet with current Plot_3D DataFrame
+                self._populate_datasheet_with_plot3d_data(datasheet)
+                
+                # No modal dialog - just print to terminal to avoid dialog behind datasheet
+                print(f"📊 Datasheet opened with {len(self.df)} data points")
+                print(f"   • Edit data directly in the spreadsheet")
+                print(f"   • Changes are automatically reflected")
+                print(f"   • Includes all Plot_3D analysis results")
+                
+                print(f"Successfully opened datasheet for {len(self.df)} points")
+                
+            except ImportError as e:
+                messagebox.showerror("Component Missing", 
+                                   f"Realtime datasheet component not available.\n\n"
+                                   f"Error: {e}\n\n"
+                                   f"This feature may require additional components to be installed.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open datasheet: {e}")
+    
+    def _populate_datasheet_with_plot3d_data(self, datasheet):
+        """Populate the datasheet with current Plot_3D DataFrame data."""
+        try:
+            if not hasattr(datasheet, 'populate_with_dataframe'):
+                print("Warning: Datasheet does not support direct DataFrame population")
+                return
+            
+            # Populate datasheet with our Plot_3D DataFrame
+            datasheet.populate_with_dataframe(self.df)
+            
+            print(f"Successfully populated datasheet with {len(self.df)} rows")
+            
+        except Exception as e:
+            print(f"Warning: Failed to populate datasheet: {e}")
+            # Fallback - show basic info
+            try:
+                messagebox.showinfo("Datasheet Info", 
+                                   f"Datasheet opened but direct data population failed.\n\n"
+                                   f"You can manually import data or use other datasheet features.\n\n"
+                                   f"Plot_3D has {len(self.df)} data points available.")
+            except:
+                pass
+    
+    def _convert_color_points_to_dataframe(self, color_points):
+        """Convert color points from ColorDataBridge to Plot_3D DataFrame format."""
+        import pandas as pd
+        import numpy as np
         
-        print("Cleanup complete, exiting application")
-        sys.exit(0)
+        # Create lists for DataFrame columns
+        data = {
+            'DataID': [],
+            'Xnorm': [],  # L* normalized (0-1)
+            'Ynorm': [],  # a* normalized (0-1)  
+            'Znorm': [],  # b* normalized (0-1)
+            'Cluster': [],
+            '∆E': [],
+            'Marker': [],
+            'Color': [],
+            'Centroid_X': [],
+            'Centroid_Y': [], 
+            'Centroid_Z': [],
+            'Sphere': []
+        }
+        
+        print(f"\n=== DATABASE TO PLOT_3D CONVERSION DEBUG ===\nProcessing {len(color_points)} color points for Plot_3D conversion...")
+        
+        cluster_count = 0
+        delta_e_count = 0
+        centroid_count = 0
+        
+        for i, point in enumerate(color_points[:3]):  # Debug first 3 points
+            # Extract Lab values
+            L, a, b = point.lab
+            print(f"\nPoint {i} ({point.id}):")
+            print(f"  Raw Lab from ColorDataBridge: ({L:.6f}, {a:.6f}, {b:.6f})")
+            
+            # Check cluster and analysis data availability
+            if hasattr(point, 'metadata') and point.metadata:
+                cluster_id = point.metadata.get('cluster_id', None)
+                delta_e = point.metadata.get('delta_e', None)
+                centroid_x = point.metadata.get('centroid_x', None)
+                print(f"  Analysis data - Cluster: {cluster_id}, ΔE: {delta_e}, Centroid_X: {centroid_x}")
+            else:
+                print(f"  No metadata available for analysis data")
+            
+            # Check if Lab values are already normalized to prevent double normalization
+            # ColorDataBridge actual Lab values: L=0-100, a≈-128 to +127, b≈-128 to +127
+            # Already normalized values would be: L=0-1, a=0-1, b=0-1 (Plot_3D format)
+            if (0.0 <= L <= 1.0 and 0.0 <= a <= 1.0 and 0.0 <= b <= 1.0):
+                # Already normalized in Plot_3D format - use as-is to prevent double normalization
+                x_norm = L  # L already 0-1
+                y_norm = a  # a already 0-1  
+                z_norm = b  # b already 0-1
+                print(f"  ✅ ALREADY NORMALIZED: Lab({L:.3f}, {a:.3f}, {b:.3f}) → Plot_3D({x_norm:.6f}, {y_norm:.6f}, {z_norm:.6f})")
+        
+        for point in color_points:
+            # Extract Lab values
+            L, a, b = point.lab
+            
+            # Check if Lab values are already normalized to prevent double normalization
+            # ColorDataBridge actual Lab values: L=0-100, a≈-128 to +127, b≈-128 to +127
+            # Already normalized values would be: L=0-1, a=0-1, b=0-1 (Plot_3D format)
+            if (0.0 <= L <= 1.0 and 0.0 <= a <= 1.0 and 0.0 <= b <= 1.0):
+                # Already normalized in Plot_3D format - use as-is to prevent double normalization
+                x_norm = L  # L already 0-1
+                y_norm = a  # a already 0-1  
+                z_norm = b  # b already 0-1
+            else:
+                # Actual Lab values - normalize to 0-1 range (Plot_3D expects normalized coordinates)
+                # L: 0-100 -> 0-1
+                # a: roughly -128 to +127 -> 0-1
+                # b: roughly -128 to +127 -> 0-1
+                x_norm = L / 100.0  # L* normalized
+                y_norm = (a + 128) / 255.0  # a* normalized 
+                z_norm = (b + 128) / 255.0  # b* normalized
+            
+            # Get marker and color from metadata using correct database column names
+            marker = point.metadata.get('marker_preference', 'o') if hasattr(point, 'metadata') and point.metadata else 'o'
+            color = point.metadata.get('color_preference', 'blue') if hasattr(point, 'metadata') and point.metadata else 'blue'
+            
+            # Extract cluster and analysis data from metadata if available
+            cluster_id = point.metadata.get('cluster_id', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            delta_e = point.metadata.get('delta_e', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            centroid_x = point.metadata.get('centroid_x', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            centroid_y = point.metadata.get('centroid_y', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            centroid_z = point.metadata.get('centroid_z', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            sphere_data = point.metadata.get('sphere_data', np.nan) if hasattr(point, 'metadata') and point.metadata else np.nan
+            
+            data['DataID'].append(point.id)
+            data['Xnorm'].append(x_norm)
+            data['Ynorm'].append(y_norm)
+            data['Znorm'].append(z_norm)
+            data['Cluster'].append(cluster_id)  # Load cluster data from metadata
+            data['∆E'].append(delta_e)  # Load ∆E data from metadata
+            data['Marker'].append(marker)
+            data['Color'].append(color)
+            data['Centroid_X'].append(centroid_x)  # Load centroid data from metadata
+            data['Centroid_Y'].append(centroid_y)
+            data['Centroid_Z'].append(centroid_z)
+            data['Sphere'].append(sphere_data)  # Load sphere data from metadata
+            
+            # Count non-nan values for summary
+            if not pd.isna(cluster_id):
+                cluster_count += 1
+            if not pd.isna(delta_e):
+                delta_e_count += 1
+            if not pd.isna(centroid_x):
+                centroid_count += 1
+        
+        # Create DataFrame
+        df = pd.DataFrame(data)
+        
+        # Log summary of loaded analysis data
+        print(f"\n=== ANALYSIS DATA LOADED ===\n"
+              f"Total points: {len(color_points)}\n"
+              f"Points with cluster assignments: {cluster_count}\n"
+              f"Points with ∆E values: {delta_e_count}\n"
+              f"Points with centroid data: {centroid_count}\n"
+              f"Successfully loaded previous analysis results: {'YES' if cluster_count > 0 else 'NO'}")
+        
+        # Add required processing columns
+        from .data_processor import process_dataframe
+        df = process_dataframe(df)
+        
+        return df
+    
+    def _convert_dataframe_to_color_points(self, df):
+        """Convert Plot_3D DataFrame back to ColorPoint objects for database saving."""
+        from utils.color_point import ColorPoint
+        import numpy as np
+        import pandas as pd
+        
+        color_points = []
+        
+        # Filter to only valid data points
+        valid_df = df[df['valid_data'] == True].copy()
+        
+        for idx, row in valid_df.iterrows():
+            try:
+                # Denormalize coordinates back to Lab
+                x_norm = row['Xnorm']
+                y_norm = row['Ynorm'] 
+                z_norm = row['Znorm']
+                
+                # Skip if any coordinates are NaN
+                if pd.isna(x_norm) or pd.isna(y_norm) or pd.isna(z_norm):
+                    continue
+                
+                # Convert normalized back to Lab
+                # L: 0-1 -> 0-100
+                # a: 0-1 -> -128 to +127
+                # b: 0-1 -> -128 to +127
+                L = x_norm * 100.0
+                a = (y_norm * 255.0) - 128.0
+                b = (z_norm * 255.0) - 128.0
+                
+                lab = (L, a, b)
+                
+                # Convert Lab to RGB for ColorPoint (rough approximation)
+                try:
+                    from utils.color_conversions import lab_to_rgb
+                    rgb = lab_to_rgb(lab)
+                except ImportError:
+                    # Simple approximation if color conversions not available
+                    r = max(0, min(255, L * 2.55 + a * 1.5))
+                    g = max(0, min(255, L * 2.55 - a * 0.5))
+                    b_val = max(0, min(255, L * 2.55 - b * 1.5))
+                    rgb = (r, g, b_val)
+                
+                # Create metadata with Plot_3D analysis results using correct database column names
+                metadata = {
+                    'source': 'plot3d_analysis',
+                    'marker_preference': row['Marker'] if pd.notna(row['Marker']) else 'o',
+                    'color_preference': row['Color'] if pd.notna(row['Color']) else 'blue',
+                }
+                
+                # Add cluster information if available
+                if pd.notna(row.get('Cluster')):
+                    metadata['cluster_id'] = row['Cluster']
+                    
+                    # Add centroid info if available
+                    if pd.notna(row.get('Centroid_X')):
+                        metadata['centroid_x'] = row['Centroid_X']
+                        metadata['centroid_y'] = row['Centroid_Y'] 
+                        metadata['centroid_z'] = row['Centroid_Z']
+                
+                # Add Delta E if available
+                if pd.notna(row.get('∆E')):
+                    metadata['delta_e'] = row['∆E']
+                
+                # Add sphere information if available
+                if pd.notna(row.get('Sphere')):
+                    # Parse sphere data if it's a string (color/radius format)
+                    sphere_data = row['Sphere']
+                    if isinstance(sphere_data, str) and '/' in sphere_data:
+                        parts = sphere_data.split('/')
+                        if len(parts) == 2:
+                            metadata['sphere_color'] = parts[0]
+                            try:
+                                metadata['sphere_radius'] = float(parts[1])
+                            except ValueError:
+                                pass
+                
+                # Get DataID
+                data_id = row['DataID'] if pd.notna(row['DataID']) else f"Point_{idx}"
+                
+                # Calculate ternary coordinates (for compatibility with ternary plot)
+                # This is a rough conversion - ideally we'd have the original ternary coords
+                try:
+                    from gui.ternary_plotter import TernaryPlotter
+                    plotter = TernaryPlotter()
+                    ternary_coords = plotter.rgb_to_ternary(rgb)
+                except Exception:
+                    # Fallback if ternary conversion fails
+                    ternary_coords = (rgb[0]/255.0, rgb[1]/255.0, rgb[2]/255.0)
+                
+                # Create ColorPoint
+                color_point = ColorPoint(
+                    id=data_id,
+                    rgb=rgb,
+                    lab=lab,
+                    ternary_coords=ternary_coords,
+                    metadata=metadata
+                )
+                
+                color_points.append(color_point)
+                
+            except Exception as e:
+                print(f"Warning: Failed to convert row {idx} to ColorPoint: {e}")
+                continue
+        
+        return color_points
 
     def _toggle_labels(self):
         """Toggle between L*a*b* and RGB axis labels"""
